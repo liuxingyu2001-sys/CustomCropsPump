@@ -8,7 +8,13 @@ import org.bukkit.Particle;
 import org.bukkit.Registry;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -57,6 +63,7 @@ public final class ConfigManager {
         fuels.clear();
         blockedFuels.clear();
 
+        mergeDefaults();
         plugin.reloadConfig();
         FileConfiguration config = plugin.getConfig();
 
@@ -172,9 +179,29 @@ public final class ConfigManager {
                 plugin.getLogger().warning("水管物品 ID 重复: " + item + "（" + key + "），已跳过。");
                 continue;
             }
-            PipeConfig pipe = new PipeConfig(key, item);
+            boolean connections = sec.getBoolean("connections", true);
+            String variantFormat = sec.getString("variant-format", "{item}_{shape}");
+            if (variantFormat == null || variantFormat.isBlank()) {
+                variantFormat = "{item}_{shape}";
+            }
+            PipeConfig pipe = new PipeConfig(key, item, connections, variantFormat);
             pipes.put(key, pipe);
             pipesByItem.put(item, pipe);
+            if (connections) {
+                // 提前把 4 种外观形态登记进查找表，这样切换外观后
+                // pipeByItem() / 方块注册都能认出它们。
+                for (String shape : PipeConfig.SHAPES) {
+                    String variant = pipe.shapeItem(shape);
+                    if (variant == null || variant.equals(item)) {
+                        continue;
+                    }
+                    PipeConfig previous = pipesByItem.putIfAbsent(variant, pipe);
+                    if (previous != null && previous != pipe) {
+                        plugin.getLogger().warning("水管形态 ID 冲突: " + variant
+                                + "（" + key + "），已保留先注册的那一个。");
+                    }
+                }
+            }
         }
     }
 
@@ -272,6 +299,13 @@ public final class ConfigManager {
         return pipes.values();
     }
 
+    /**
+     * 所有需要在 CustomCrops 里注册的水管物品 ID：基础物品 + 64 个连接变体。
+     */
+    public Collection<String> pipeItems() {
+        return pipesByItem.keySet();
+    }
+
     public boolean isPumpItem(String item) {
         return pumpsByItem.containsKey(item);
     }
@@ -328,5 +362,35 @@ public final class ConfigManager {
 
     public Messages messages() {
         return messages;
+    }
+
+    /**
+     * 把 jar 内默认 config.yml 里“磁盘配置没有的键”补写到磁盘。
+     *
+     * <p>插件升级后新增的配置项不会自动出现在老服务器的 config.yml 里
+     * （{@code copyDefaults} 只影响内存读取，不写盘），玩家既看不到新选项，
+     * 也没法改。这里用和 messages.yml 相同的办法：以 jar 内文件为默认值，
+     * 只补缺失的键，已有值一律保留，然后回写磁盘。
+     */
+    private void mergeDefaults() {
+        File file = new File(plugin.getDataFolder(), "config.yml");
+        if (!file.exists()) {
+            // 文件被删了（reload 时不会走 saveDefaultConfig），重新生成一份
+            plugin.saveDefaultConfig();
+            return;
+        }
+        YamlConfiguration current = YamlConfiguration.loadConfiguration(file);
+        try (InputStream in = plugin.getResource("config.yml")) {
+            if (in == null) {
+                return;
+            }
+            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
+                    new InputStreamReader(in, StandardCharsets.UTF_8));
+            current.setDefaults(defaults);
+            current.options().copyDefaults(true);
+            current.save(file);
+        } catch (IOException e) {
+            plugin.getLogger().warning("补全 config.yml 默认配置失败: " + e.getMessage());
+        }
     }
 }

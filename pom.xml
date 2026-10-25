@@ -6,7 +6,7 @@
 
     <groupId>com.liu</groupId>
     <artifactId>CustomCropsPump</artifactId>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
     <packaging>jar</packaging>
 
     <name>CustomCropsPump</name>
@@ -29,6 +29,14 @@
     </repositories>
 
     <dependencies>
+        <!-- SQLite 驱动：编译期依赖，运行期由 Paper 按 plugin.yml 的
+             libraries 自动下载，不会打进本插件 jar。 -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.46.0.0</version>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>

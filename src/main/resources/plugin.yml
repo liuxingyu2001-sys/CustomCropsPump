@@ -9,6 +9,10 @@ depend: [CustomCrops]
 softdepend: [CraftEngine]
 folia-supported: false
 
+# SQLite 驱动由 Paper 启动时自动下载（不打进插件 jar）
+libraries:
+  - org.xerial:sqlite-jdbc:3.46.0.0
+
 commands:
   ccpump:
     description: CustomCropsPump 管理命令

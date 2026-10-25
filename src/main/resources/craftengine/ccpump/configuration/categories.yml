@@ -8,3 +8,13 @@ categories:
     list:
       - ccpump:water_pump
       - ccpump:water_pipe
+      - ccpump:water_pipe_straight_ew
+      - ccpump:water_pipe_straight_ns
+      - ccpump:water_pipe_vertical
+      - ccpump:water_pipe_end_east
+      - ccpump:water_pipe_end_west
+      - ccpump:water_pipe_end_up
+      - ccpump:water_pipe_end_down
+      - ccpump:water_pipe_end_south
+      - ccpump:water_pipe_end_north
+      - ccpump:water_pipe_cross

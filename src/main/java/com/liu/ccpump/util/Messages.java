@@ -10,6 +10,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 读取 messages.yml，支持 & 颜色代码和 {占位符}。
@@ -67,6 +69,25 @@ public final class Messages {
     public String text(String key, String... placeholders) {
         String raw = config.getString(key, key);
         return apply(raw, placeholders);
+    }
+
+    /**
+     * 读取多行文本（例如 GUI 的 lore），逐行替换占位符。
+     */
+    public List<String> list(String key, String... placeholders) {
+        List<String> raw = config.getStringList(key);
+        if (raw.isEmpty()) {
+            String single = config.getString(key);
+            if (single == null) {
+                return List.of();
+            }
+            raw = List.of(single.split("\\n", -1));
+        }
+        List<String> result = new ArrayList<>(raw.size());
+        for (String line : raw) {
+            result.add(apply(line, placeholders));
+        }
+        return result;
     }
 
     public void send(CommandSender sender, String key, String... placeholders) {

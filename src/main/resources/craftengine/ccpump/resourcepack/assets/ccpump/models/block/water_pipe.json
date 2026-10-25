@@ -1,5 +1,5 @@
 {
-  "credit": "CustomCropsPump - generated connected copper water pipe (mask 63)",
+  "credit": "CustomCropsPump - generated copper water pipe (icon)",
   "textures": {
     "particle": "minecraft:block/copper_block",
     "body": "minecraft:block/copper_block",

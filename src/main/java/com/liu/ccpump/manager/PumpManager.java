@@ -152,7 +152,7 @@ public final class PumpManager {
         BlockKey key = BlockKey.of(location);
         PumpInstance pump = pumps.get(key);
         if (pump == null) {
-            // data.yml 丢记录或区块刚加载时，用世界上真实的家具 ID 自愈
+            // 数据库丢记录或区块刚加载时，用世界上真实的家具 ID 自愈
             pump = registerExistingPump(key);
         }
         if (pump == null) {
@@ -189,7 +189,8 @@ public final class PumpManager {
             return;
         }
 
-        plugin.gui().open(player, key);
+        // 界面里会显示动力，这里不再额外发聊天提示，避免"右键只弹出消息"的错觉
+        plugin.getServer().getScheduler().runTask(plugin, () -> plugin.gui().open(player, key));
     }
 
     /**
@@ -201,14 +202,14 @@ public final class PumpManager {
     }
 
     /**
-     * 世界上存在、但内存里没有登记的水泵：按家具 ID 重新登记。
+     * 世界上存在、但内存里没有登记的水泵：按方块 ID 重新登记。
      */
     private PumpInstance registerExistingPump(BlockKey key) {
         World world = Bukkit.getWorld(key.world());
         if (world == null || !isChunkLoaded(world, key)) {
             return null;
         }
-        String itemId = furnitureId(key, world);
+        String itemId = blockId(key, world);
         PumpConfig pumpConfig = itemId == null ? null : config.pumpByItem(itemId);
         if (pumpConfig == null) {
             return null;
@@ -314,25 +315,9 @@ public final class PumpManager {
             config.messages().send(player, "no-permission");
             return;
         }
-        // 洒水器可能是刚放下的，顺便校正一次外观
-        refreshPipeAppearance(key);
-
-        int maxPipes = 256;
-        int maxSprinklers = 64;
-        int maxDistance = 128;
-        for (PumpConfig pumpConfig : config.pumps()) {
-            maxPipes = Math.max(maxPipes, pumpConfig.network().maxPipes());
-            maxSprinklers = Math.max(maxSprinklers, pumpConfig.network().maxSprinklers());
-            maxDistance = Math.max(maxDistance, pumpConfig.network().maxDistance());
-        }
-
-        Network network = buildNetwork(pipe.key(), maxPipes, maxSprinklers, maxDistance, true);
-        String state = config.messages().text(network.pumps() > 0 ? "pipe-connected" : "pipe-disconnected");
-        config.messages().send(player, "pipe-info",
-                "pipes", String.valueOf(network.pipes().size() + 1),
-                "pumps", String.valueOf(network.pumps()),
-                "sprinklers", String.valueOf(network.sprinklers().size()),
-                "state", state);
+        // 洒水器可能是刚放下的，顺便校正一次外观。
+        // 右键水管不显示任何提示：这里刻意不发消息。
+        schedulePipeRefresh(key);
     }
 
     private PipeInstance registerExistingPipe(BlockKey key) {
@@ -340,7 +325,7 @@ public final class PumpManager {
         if (world == null || !isChunkLoaded(world, key)) {
             return null;
         }
-        String itemId = furnitureId(key, world);
+        String itemId = blockId(key, world);
         PipeConfig pipeConfig = itemId == null ? null : config.pipeByItem(itemId);
         if (pipeConfig == null) {
             return null;
@@ -405,9 +390,9 @@ public final class PumpManager {
         if (world == null || !isChunkLoaded(world, key)) {
             return;
         }
-        String current = furnitureId(key, world);
+        String current = blockId(key, world);
         if (current == null) {
-            // 家具还没加载出来（区块刚加载），交给下一次校验
+            // 方块还没就绪（区块刚加载），交给下一次校验
             return;
         }
         String desired = pipeConfig.variantItem(connectedMask(key));
@@ -423,6 +408,17 @@ public final class PumpManager {
                     .remove(location, ExistenceForm.FURNITURE);
             plugin.customCrops().getItemManager()
                     .place(location, ExistenceForm.FURNITURE, desired, rotation);
+            if (furnitureId(key, world) == null) {
+                // 形态家具定义缺失（或放置失败）：恢复原样，别把水管弄丢
+                missingPipeVariants.add(desired);
+                plugin.customCrops().getItemManager()
+                        .place(location, ExistenceForm.FURNITURE, current, rotation);
+                if (warnedPipeVariants.add(pipeConfig.key())) {
+                    plugin.getLogger().warning("水管形态家具 " + desired
+                            + " 没有对应的定义，已恢复原外观。请检查资源包里的物品配置。");
+                }
+                return;
+            }
             debug(() -> "水管外观 " + key + " -> " + desired);
         } catch (Throwable throwable) {
             plugin.getLogger().warning("切换水管外观失败（" + key + "）: " + throwable.getMessage());
@@ -823,9 +819,7 @@ public final class PumpManager {
             if (world == null || !isChunkLoaded(world, pump.key())) {
                 continue;
             }
-            String blockId = plugin.customCrops().getItemManager()
-                    .id(pump.key().toLocation(world), ExistenceForm.ANY);
-            if (!pumpConfig.item().equals(blockId)) {
+            if (!isStillThere(pump.key(), world, pumpConfig)) {
                 iterator.remove();
                 pipeVersion++;
                 debug(() -> "清理失效水泵 @ " + pump.key());
@@ -845,14 +839,49 @@ public final class PumpManager {
             if (world == null || !isChunkLoaded(world, pipe.key())) {
                 continue;
             }
-            String blockId = plugin.customCrops().getItemManager()
-                    .id(pipe.key().toLocation(world), ExistenceForm.ANY);
-            if (!pipeConfig.item().equals(blockId)) {
+            String itemId = blockId(pipe.key(), world);
+            PipeConfig current = itemId == null ? null : config.pipeByItem(itemId);
+            boolean valid = current != null && current.key().equals(pipeConfig.key());
+            if (!valid) {
                 iterator.remove();
                 removePipeIndex(pipe.key());
                 pipeVersion++;
                 debug(() -> "清理失效水管 @ " + pipe.key());
+            } else {
+                refreshPipeAppearance(pipe.key());
             }
+        }
+    }
+
+    /**
+     * 判断水泵是否还在：只认家具 ID。
+     * <p>
+     * 注意：不能用 {@code ExistenceForm.ANY}。水泵脚下通常是草方块/水，
+     * ANY 会优先返回脚下方块 ID，把水泵误判成“已消失”并在
+     * validate-interval 后删掉记录（表现就是放一会儿再右键没反应）。
+     */
+    private boolean isStillThere(BlockKey key, World world, PumpConfig pumpConfig) {
+        String currentId = furnitureId(key, world);
+        if (currentId == null) {
+            return false;
+        }
+        PumpConfig current = config.pumpByItem(currentId);
+        return current != null && pumpConfig.item().equals(current.item());
+    }
+
+    /**
+     * 读该位置的家具 ID；不是本插件的水泵/水管时返回 null。
+     */
+    private String blockId(BlockKey key, World world) {
+        return furnitureId(key, world);
+    }
+
+    private String furnitureId(BlockKey key, World world) {
+        try {
+            return plugin.customCrops().getItemManager()
+                    .id(key.toLocation(world), ExistenceForm.FURNITURE);
+        } catch (Throwable throwable) {
+            return null;
         }
     }
 
@@ -874,6 +903,15 @@ public final class PumpManager {
     }
 
     /**
+     * 重载后清掉“变体是否存在”的缓存：资源包可能刚刚更新。
+     */
+    public void clearAppearanceCache() {
+        knownPipeVariants.clear();
+        missingPipeVariants.clear();
+        warnedPipeVariants.clear();
+    }
+
+    /**
      * 重载配置后把水量/动力夹到新上限，避免旧数据超过新容量。
      */
     public void clampToConfig() {
@@ -892,6 +930,25 @@ public final class PumpManager {
 
     public Collection<PumpInstance> pumpInstances() {
         return List.copyOf(pumps.values());
+    }
+
+    public PumpInstance pumpAt(BlockKey key) {
+        return pumps.get(key);
+    }
+
+    /**
+     * 查询某台水泵当前的管网（带缓存），供 GUI 显示。
+     */
+    public Network networkOf(BlockKey key) {
+        PumpInstance pump = pumps.get(key);
+        if (pump == null) {
+            return Network.EMPTY;
+        }
+        PumpConfig pumpConfig = config.pump(pump.typeKey());
+        if (pumpConfig == null) {
+            return Network.EMPTY;
+        }
+        return network(pump, false, pumpConfig);
     }
 
     public Collection<PipeInstance> pipeInstances() {

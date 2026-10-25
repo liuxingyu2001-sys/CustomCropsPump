@@ -3,10 +3,12 @@ package com.liu.ccpump;
 import com.liu.ccpump.block.PumpPipeBlock;
 import com.liu.ccpump.command.PumpCommand;
 import com.liu.ccpump.config.ConfigManager;
-import com.liu.ccpump.config.PipeConfig;
 import com.liu.ccpump.config.PumpConfig;
 import com.liu.ccpump.data.DataStore;
+import com.liu.ccpump.gui.PumpGui;
+import com.liu.ccpump.gui.PumpGuiListener;
 import com.liu.ccpump.listener.CustomCropsReloadListener;
+import com.liu.ccpump.listener.SprinklerConnectionListener;
 import com.liu.ccpump.manager.PumpManager;
 import com.liu.ccpump.util.PackInstaller;
 import net.momirealms.customcrops.api.BukkitCustomCropsPlugin;
@@ -23,6 +25,7 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
     private ConfigManager configManager;
     private PumpManager pumpManager;
     private DataStore dataStore;
+    private PumpGui gui;
     private BukkitTask tickTask;
     private BukkitTask saveTask;
 
@@ -35,10 +38,13 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
 
         this.dataStore = new DataStore(this);
         this.pumpManager = new PumpManager(this, configManager);
+        this.gui = new PumpGui(this);
         this.dataStore.load(pumpManager);
 
         this.registerBlockIds();
         getServer().getPluginManager().registerEvents(new CustomCropsReloadListener(this), this);
+        getServer().getPluginManager().registerEvents(new PumpGuiListener(this), this);
+        getServer().getPluginManager().registerEvents(new SprinklerConnectionListener(this), this);
 
         PumpCommand command = new PumpCommand(this);
         PluginCommand pluginCommand = getCommand("ccpump");
@@ -79,8 +85,10 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
         for (PumpConfig pumpConfig : configManager.pumps()) {
             register(pumpConfig.item(), true);
         }
-        for (PipeConfig pipeConfig : configManager.pipes()) {
-            register(pipeConfig.item(), false);
+        // 水管有 64 个按连接方向切换外观的变体物品，全部要注册，
+        // 否则切换外观后 CustomCrops 找不到方块类型，右键/破坏会失效。
+        for (String pipeItem : configManager.pipeItems()) {
+            register(pipeItem, false);
         }
     }
 
@@ -110,6 +118,7 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
         }
         registerBlockIds();
         PackInstaller.install(this);
+        pumpManager.clearAppearanceCache();
         pumpManager.clampToConfig();
         pumpManager.invalidateNetworks();
         startTasks();
@@ -136,6 +145,10 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
 
     public DataStore dataStore() {
         return dataStore;
+    }
+
+    public PumpGui gui() {
+        return gui;
     }
 
     public BukkitCustomCropsPlugin customCrops() {

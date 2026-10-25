@@ -47,21 +47,23 @@ craftengine-pack:
 # ------------------------------------------------------------
 charge:
   fuels:
+    # 一次投料能撑多久 = amount ÷ charge-per-cycle × tick-interval 秒。
+    # 默认每个主循环消耗 1 点动力、每秒跑一次，所以 amount 基本等于“秒数”。
     redstone:
       item: minecraft:redstone
-      amount: 50
+      amount: 5
     lapis_lazuli:
       item: minecraft:lapis_lazuli
-      amount: 100
+      amount: 15
     raw_iron:
       item: minecraft:raw_iron
-      amount: 200
+      amount: 25
     raw_gold:
       item: minecraft:raw_gold
-      amount: 250
+      amount: 35
     diamond:
       item: minecraft:diamond
-      amount: 1000
+      amount: 100
   blocked-items:
     - minecraft:iron_ingot
     - minecraft:gold_ingot
@@ -83,7 +85,9 @@ pumps:
     # 右键水桶一次补充的水量
     bucket-amount: 4
     # 动力容量。0 = 不需要动力（无限动力）
-    charge-capacity: 1000
+    # 一次投料最多只能存到这个上限，超出的部分会被丢弃，
+    # 所以容量决定了“最多能囤多久的动力”，请配合 charge.fuels 一起调。
+    charge-capacity: 100
     # 每完成一次实际工作（抽水或补水）消耗的动力
     charge-per-cycle: 1
     # 是否允许潜行 + 右键开关水泵
@@ -123,3 +127,12 @@ pumps:
 pipes:
   water_pipe:
     item: ccpump:water_pipe
+    # 按相邻连接方向切换外观。
+    # 外观只区分 4 种形态（不是 64 种连接组合），避免耗尽 CraftEngine 的
+    # 视觉状态槽位，插件自带的资源包已经包含这 4 个模型，保持 true 即可。
+    # 换成别的物品提供方、又没有这些模型时设为 false，水管会一直使用 item 的模型。
+    connections: true
+    # 形态物品 ID 的生成规则，{item} = 上面的 item，{shape} = 形态名。
+    # 形态名：straight_ew（横-东西）、straight_ns（横-南北）、
+    #         vertical（纵向）、cross（六面管子，端点/拐角/T 形/十字都用它）。
+    variant-format: "{item}_{shape}"
