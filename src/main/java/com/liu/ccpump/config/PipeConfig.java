@@ -3,14 +3,22 @@ package com.liu.ccpump.config;
 /**
  * 一根水管的配置。
  *
- * <p>水管会按相邻连接方向切换外观。为了不耗尽 CraftEngine 的视觉状态槽位，
- * 外观只区分 4 种固定形态（而不是 64 种连接组合）：
+ * <p>水管是 CraftEngine 自定义方块（{@code block_item}），方块状态借用原版
+ * 仙人掌的 16 个 age 槽位（{@code auto_state: cactus}），但外观是插件自己的
+ * 铜管模型。外观区分 4 种形态：
  *
  * <ul>
  *   <li>{@code <item>_straight_ew} 横向直管（东西向）</li>
  *   <li>{@code <item>_straight_ns} 横向直管（南北向）</li>
  *   <li>{@code <item>_vertical}    纵向直管（上下向）</li>
- *   <li>{@code <item>_cross}       六面管子（端点 / 拐角 / T 形 / 十字）</li>
+ *   <li>{@code <item>_cross}      水平十字（拐角 / T 形 / 十字 / 没接）</li>
+ * </ul>
+ *
+ * <p>连通规则（见 {@code PumpManager.connectedMask}）：
+ * <ul>
+ *   <li>水平方向（东西南北）：相邻的水泵、水管、洒水器都算连接；</li>
+ *   <li>垂直方向（上下）：只有相邻水管算连接，水泵与洒水器都不接，
+ *       所以竖管自成一路，不会和平面管网串起来。</li>
  * </ul>
  *
  * <p>形态 ID 规则来自 {@code variant-format}，默认 {@code {item}_{shape}}，
@@ -27,28 +35,12 @@ public record PipeConfig(String key, String item, boolean connections, String va
     public static final String SHAPE_STRAIGHT_NS = "straight_ns";
     /** 形态常量：纵向直管（上下向）。 */
     public static final String SHAPE_VERTICAL = "vertical";
-    /** 形态常量：六面管子（拐角 / T 形 / 十字 / 完全没接）。 */
+    /** 形态常量：水平十字（拐角 / T 形 / 十字 / 没接）。 */
     public static final String SHAPE_CROSS = "cross";
 
-    /** 单臂端点：只往东伸出一根管。 */
-    public static final String SHAPE_END_EAST = "end_east";
-    /** 单臂端点：只往西伸出一根管。 */
-    public static final String SHAPE_END_WEST = "end_west";
-    /** 单臂端点：只往上伸出一根管。 */
-    public static final String SHAPE_END_UP = "end_up";
-    /** 单臂端点：只往下伸出一根管。 */
-    public static final String SHAPE_END_DOWN = "end_down";
-    /** 单臂端点：只往南伸出一根管。 */
-    public static final String SHAPE_END_SOUTH = "end_south";
-    /** 单臂端点：只往北伸出一根管。 */
-    public static final String SHAPE_END_NORTH = "end_north";
-
-    /** 所有形态，注册家具 ID 与生成资源包时按这个顺序使用。 */
+    /** 所有形态，注册方块 ID 与生成资源包时按这个顺序使用。 */
     public static final String[] SHAPES = {
-            SHAPE_STRAIGHT_EW, SHAPE_STRAIGHT_NS, SHAPE_VERTICAL,
-            SHAPE_END_EAST, SHAPE_END_WEST, SHAPE_END_UP,
-            SHAPE_END_DOWN, SHAPE_END_SOUTH, SHAPE_END_NORTH,
-            SHAPE_CROSS
+            SHAPE_STRAIGHT_EW, SHAPE_STRAIGHT_NS, SHAPE_VERTICAL, SHAPE_CROSS
     };
 
     /** 连接掩码位：东、西、上、下、南、北（与 PumpManager.DIRECTIONS 一致）。 */
@@ -60,48 +52,34 @@ public record PipeConfig(String key, String item, boolean connections, String va
     private static final int NORTH = 1 << 5;
 
     private static final int HORIZONTAL = EAST | WEST | SOUTH | NORTH;
+    private static final int VERTICAL = UP | DOWN;
 
     /**
      * 按连接掩码挑选外观形态。
      *
-     * <p>分三档：只连一个方向 → 单臂端点（只伸出一根管，管道尽头的样子）；
-     * 正好一对相对方向 → 直管（横-东西 / 横-南北 / 纵-上下）；
-     * 其余（拐角、T 形、十字、完全没接）→ 六面管子。
+     * <p>水平与垂直是两套互不相通的管网：
+     * <ul>
+     *   <li>只有垂直连接（上下）→ {@code vertical} 直管；</li>
+     *   <li>水平方向连着（含只连一个方向）→ 直管或十字管；</li>
+     *   <li>水平面内的拐角 / T 形 / 十字 / 完全没接 → {@code cross}。</li>
+     * </ul>
      */
     public static String shapeOf(int mask) {
-        switch (mask) {
-            case EAST -> {
-                return SHAPE_END_EAST;
-            }
-            case WEST -> {
-                return SHAPE_END_WEST;
-            }
-            case UP -> {
-                return SHAPE_END_UP;
-            }
-            case DOWN -> {
-                return SHAPE_END_DOWN;
-            }
-            case SOUTH -> {
-                return SHAPE_END_SOUTH;
-            }
-            case NORTH -> {
-                return SHAPE_END_NORTH;
-            }
-            default -> {
-            }
-        }
+        int vertical = mask & VERTICAL;
         int horizontal = mask & HORIZONTAL;
-        int vertical = mask & (UP | DOWN);
+        if (vertical != 0 && horizontal == 0) {
+            return SHAPE_VERTICAL;
+        }
         if (vertical == 0) {
-            if (horizontal == (EAST | WEST)) {
+            // 只有东西方向通（含只连一边）→ 东西直管；只有南北方向通 → 南北直管。
+            // 只连一个方向时另一端收进中心块，外观差别只在最末端那一格，
+            // 没必要单独做六种端点模型。
+            if ((horizontal & (SOUTH | NORTH)) == 0 && horizontal != 0) {
                 return SHAPE_STRAIGHT_EW;
             }
-            if (horizontal == (SOUTH | NORTH)) {
+            if ((horizontal & (EAST | WEST)) == 0 && horizontal != 0) {
                 return SHAPE_STRAIGHT_NS;
             }
-        } else if (horizontal == 0 && vertical == (UP | DOWN)) {
-            return SHAPE_VERTICAL;
         }
         return SHAPE_CROSS;
     }

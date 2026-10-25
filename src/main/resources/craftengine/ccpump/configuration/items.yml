@@ -1,181 +1,193 @@
 # ============================================================
 #  由 tools/generate_pipe_variants.py 自动生成，请勿手工编辑。
 #
-#  水泵 / 水管是 CraftEngine **实体家具**（furniture），不是方块：
-#    · 不占用原版方块状态，不受各状态组槽位数量限制
-#    · 用 shulker 碰撞箱提供碰撞，走不过去、也能站上去
-#    · 实体不是方块，所以不挡水、也参与方块面剔除
-#  水管的 4 种外观形态见 pipe_variants.yml。
+#  水泵 / 水管是 CraftEngine **自定义方块**（block_item）：
+#    · 有真实碰撞箱，能挡水，也能贴墙/贴天花板放置
+#    · 方块状态借用原版 minecraft:cactus 的 16 个 age 槽位
+#      （auto_state: cactus），但外观用插件自己的铜管模型
+#
+#  连通规则：
+#    · 水平（东西南北）：水管、水泵、洒水器互相连通
+#    · 垂直（上下）：只有水管互相连通，自成一路
 # ============================================================
 items:
   ccpump:water_pump:
-    material: paper
     data:
-      item-name: <!i><gold>水泵</gold>
+      item-name: "<!i><gold>水泵</gold>"
     model: ccpump:block/water_pump
     behavior:
-      type: furniture_item
-      rules:
-        ground:
-          rotation: four
-          alignment: center
-        wall:
-          rotation: four
-          alignment: center
-        ceiling:
-          rotation: four
-          alignment: center
-      ignore-placer: false
-      ignore-entities: false
-      furniture:
+      type: block_item
+      block:
         settings:
-          item: ccpump:water_pump
+          hardness: 0.6
+          resistance: 0.6
+          is_suffocating: false
+          is_redstone_conductor: false
+          is_view_blocking: false
+          can_occlude: false
+          replaceable: false
           sounds:
             break: minecraft:block.copper.break
             place: minecraft:block.copper.place
-        variants:
-          ground:
-            loot-spawn-offset: 0,0.5,0
-            elements:
-              - item: ccpump:water_pump
-                display-transform: NONE
-                billboard: FIXED
-                translation: 0,0.5,0
-            hitboxes:
-              # 水泵用 shulker 碰撞箱提供真实碰撞，同时它自己就是右键交互
-              # 的判定箱（不额外加 interaction，避免两个判定箱重叠点不到）。
-              # can-use-item-on: false 表示手持方块右键时优先走水泵交互
-              # （打开界面 / 充能），而不是把方块放下去。
-              - type: shulker
-                can-use-item-on: false
-                blocks-building: true
-                can-be-hit-by-projectile: false
-                position: 0,0,0
-                scale: 0.9
-                peek: 0
-                interactive: true
-                interaction-entity: true
-                invisible: true
-          # 贴墙放置：模型往墙面方向收一点，碰撞箱略小
-          wall:
-            loot-spawn-offset: 0,0.5,0
-            elements:
-              - item: ccpump:water_pump
-                display-transform: NONE
-                billboard: FIXED
-                translation: 0,0.5,0
-            hitboxes:
-              - type: shulker
-                can-use-item-on: false
-                blocks-building: true
-                can-be-hit-by-projectile: false
-                position: 0,0,0
-                scale: 0.7
-                peek: 0
-                interactive: true
-                interaction-entity: true
-                invisible: true
-          # 吊在天花板下
-          ceiling:
-            loot-spawn-offset: 0,0.5,0
-            elements:
-              - item: ccpump:water_pump
-                display-transform: NONE
-                billboard: FIXED
-                translation: 0,0.5,0
-            hitboxes:
-              - type: shulker
-                can-use-item-on: false
-                blocks-building: true
-                can-be-hit-by-projectile: false
-                position: 0,0,0
-                scale: 0.7
-                peek: 0
-                interactive: true
-                interaction-entity: true
-                invisible: true
-        loot:
-          template: default:loot_table/basic
-          arguments:
-            item: ccpump:water_pump
-
+            hit: minecraft:block.copper.hit
+            step: minecraft:block.copper.step
+            fall: minecraft:block.copper.fall
+        states:
+          appearances:
+            default:
+              auto_state: cactus
+              model:
+                path: ccpump:block/water_pump
+          variants:
+            default:
+              appearance: default
   ccpump:water_pipe:
-    material: paper
     data:
-      item-name: <!i><gold>水管</gold>
+      item-name: "<!i><gold>水管</gold>"
     model: ccpump:block/water_pipe
     behavior:
-      type: furniture_item
-      rules:
-        ground:
-          rotation: four
-          alignment: center
-        wall:
-          rotation: four
-          alignment: center
-        ceiling:
-          rotation: four
-          alignment: center
-      ignore-placer: false
-      ignore-entities: false
-      furniture:
+      type: block_item
+      block:
         settings:
-          item: ccpump:water_pipe
+          hardness: 0.6
+          resistance: 0.6
+          is_suffocating: false
+          is_redstone_conductor: false
+          is_view_blocking: false
+          can_occlude: false
+          replaceable: false
           sounds:
             break: minecraft:block.copper.break
             place: minecraft:block.copper.place
-        variants:
-          ground:
-            loot-spawn-offset: 0,0.5,0
-            elements:
-              - item: ccpump:water_pipe
-                display-transform: NONE
-                billboard: FIXED
-                translation: 0,0.5,0
-            hitboxes:
-              - type: shulker
-                can-use-item-on: true
-                blocks-building: true
-                can-be-hit-by-projectile: false
-                position: 0,0.1,0
-                scale: 0.6
-                peek: 0
-                interactive: true
-                interaction-entity: true
-                invisible: true
-          wall:
-            loot-spawn-offset: 0,0.5,0
-            elements:
-              - item: ccpump:water_pipe
-                display-transform: NONE
-                billboard: FIXED
-                translation: 0,0.5,0
-            hitboxes:
-              - type: shulker
-                can-use-item-on: true
-                blocks-building: true
-                can-be-hit-by-projectile: false
-                position: 0,0,0
-                scale: 0.5
-                peek: 0
-                interactive: true
-                interaction-entity: true
-                invisible: true
-          ceiling:
-            loot-spawn-offset: 0,0.5,0
-            elements:
-              - item: ccpump:water_pipe
-                display-transform: NONE
-                billboard: FIXED
-                translation: 0,0.5,0
-            hitboxes:
-              - type: shulker
-                can-use-item-on: true
-                blocks-building: true
-                can-be-hit-by-projectile: false
-                position: 0,0,0
-                scale: 0.5
-                peek: 0
-                interactive: true
-                interaction-entity: true
-                invisible: true
+            hit: minecraft:block.copper.hit
+            step: minecraft:block.copper.step
+            fall: minecraft:block.copper.fall
+        states:
+          appearances:
+            default:
+              auto_state: cactus
+              model:
+                path: ccpump:block/water_pipe
+          variants:
+            default:
+              appearance: default
+  ccpump:water_pipe_straight_ew:
+    data:
+      item-name: "<!i><gold>水管</gold><gray> · 横向直管（东西）</gray>"
+    model: ccpump:block/pipe/water_pipe_straight_ew
+    behavior:
+      type: block_item
+      block:
+        settings:
+          hardness: 0.6
+          resistance: 0.6
+          is_suffocating: false
+          is_redstone_conductor: false
+          is_view_blocking: false
+          can_occlude: false
+          replaceable: false
+          sounds:
+            break: minecraft:block.copper.break
+            place: minecraft:block.copper.place
+            hit: minecraft:block.copper.hit
+            step: minecraft:block.copper.step
+            fall: minecraft:block.copper.fall
+        states:
+          appearances:
+            default:
+              auto_state: cactus
+              model:
+                path: ccpump:block/pipe/water_pipe_straight_ew
+          variants:
+            default:
+              appearance: default
+  ccpump:water_pipe_straight_ns:
+    data:
+      item-name: "<!i><gold>水管</gold><gray> · 横向直管（南北）</gray>"
+    model: ccpump:block/pipe/water_pipe_straight_ns
+    behavior:
+      type: block_item
+      block:
+        settings:
+          hardness: 0.6
+          resistance: 0.6
+          is_suffocating: false
+          is_redstone_conductor: false
+          is_view_blocking: false
+          can_occlude: false
+          replaceable: false
+          sounds:
+            break: minecraft:block.copper.break
+            place: minecraft:block.copper.place
+            hit: minecraft:block.copper.hit
+            step: minecraft:block.copper.step
+            fall: minecraft:block.copper.fall
+        states:
+          appearances:
+            default:
+              auto_state: cactus
+              model:
+                path: ccpump:block/pipe/water_pipe_straight_ns
+          variants:
+            default:
+              appearance: default
+  ccpump:water_pipe_vertical:
+    data:
+      item-name: "<!i><gold>水管</gold><gray> · 纵向直管（上下）</gray>"
+    model: ccpump:block/pipe/water_pipe_vertical
+    behavior:
+      type: block_item
+      block:
+        settings:
+          hardness: 0.6
+          resistance: 0.6
+          is_suffocating: false
+          is_redstone_conductor: false
+          is_view_blocking: false
+          can_occlude: false
+          replaceable: false
+          sounds:
+            break: minecraft:block.copper.break
+            place: minecraft:block.copper.place
+            hit: minecraft:block.copper.hit
+            step: minecraft:block.copper.step
+            fall: minecraft:block.copper.fall
+        states:
+          appearances:
+            default:
+              auto_state: cactus
+              model:
+                path: ccpump:block/pipe/water_pipe_vertical
+          variants:
+            default:
+              appearance: default
+  ccpump:water_pipe_cross:
+    data:
+      item-name: "<!i><gold>水管</gold><gray> · 水平十字管</gray>"
+    model: ccpump:block/pipe/water_pipe_cross
+    behavior:
+      type: block_item
+      block:
+        settings:
+          hardness: 0.6
+          resistance: 0.6
+          is_suffocating: false
+          is_redstone_conductor: false
+          is_view_blocking: false
+          can_occlude: false
+          replaceable: false
+          sounds:
+            break: minecraft:block.copper.break
+            place: minecraft:block.copper.place
+            hit: minecraft:block.copper.hit
+            step: minecraft:block.copper.step
+            fall: minecraft:block.copper.fall
+        states:
+          appearances:
+            default:
+              auto_state: cactus
+              model:
+                path: ccpump:block/pipe/water_pipe_cross
+          variants:
+            default:
+              appearance: default

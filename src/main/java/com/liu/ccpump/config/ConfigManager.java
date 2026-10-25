@@ -188,8 +188,8 @@ public final class ConfigManager {
             pipes.put(key, pipe);
             pipesByItem.put(item, pipe);
             if (connections) {
-                // 提前把 4 种外观形态登记进查找表，这样切换外观后
-                // pipeByItem() / 方块注册都能认出它们。
+                // 形态方块也要登记进查找表，这样切换外观后 pipeByItem()
+                // 和方块注册都能认出它们。
                 for (String shape : PipeConfig.SHAPES) {
                     String variant = pipe.shapeItem(shape);
                     if (variant == null || variant.equals(item)) {

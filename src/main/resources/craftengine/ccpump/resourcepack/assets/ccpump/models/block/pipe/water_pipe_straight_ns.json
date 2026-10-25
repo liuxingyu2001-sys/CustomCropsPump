@@ -2,9 +2,7 @@
   "credit": "CustomCropsPump - generated copper water pipe (straight_ns)",
   "textures": {
     "particle": "minecraft:block/copper_block",
-    "body": "minecraft:block/copper_block",
-    "dark": "minecraft:block/exposed_copper",
-    "accent": "minecraft:block/weathered_copper"
+    "body": "minecraft:block/copper_block"
   },
   "elements": [
     {
@@ -26,7 +24,7 @@
             16,
             16
           ],
-          "texture": "#dark"
+          "texture": "#body"
         },
         "up": {
           "uv": [
@@ -35,7 +33,7 @@
             16,
             16
           ],
-          "texture": "#dark"
+          "texture": "#body"
         },
         "north": {
           "uv": [
@@ -44,7 +42,7 @@
             16,
             16
           ],
-          "texture": "#dark"
+          "texture": "#body"
         },
         "south": {
           "uv": [
@@ -53,7 +51,7 @@
             16,
             16
           ],
-          "texture": "#dark"
+          "texture": "#body"
         },
         "east": {
           "uv": [
@@ -62,7 +60,7 @@
             16,
             16
           ],
-          "texture": "#dark"
+          "texture": "#body"
         },
         "west": {
           "uv": [
@@ -71,7 +69,7 @@
             16,
             16
           ],
-          "texture": "#dark"
+          "texture": "#body"
         }
       }
     },
@@ -84,7 +82,7 @@
       "to": [
         10,
         10,
-        15
+        16
       ],
       "faces": {
         "down": {
@@ -147,7 +145,7 @@
       "from": [
         5,
         5,
-        14
+        13
       ],
       "to": [
         11,
@@ -162,7 +160,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "up": {
           "uv": [
@@ -171,7 +169,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "north": {
           "uv": [
@@ -180,7 +178,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "south": {
           "uv": [
@@ -189,7 +187,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "east": {
           "uv": [
@@ -198,7 +196,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "west": {
           "uv": [
@@ -207,7 +205,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         }
       }
     },
@@ -215,7 +213,7 @@
       "from": [
         6,
         6,
-        1
+        0
       ],
       "to": [
         10,
@@ -288,7 +286,7 @@
       "to": [
         11,
         11,
-        2
+        3
       ],
       "faces": {
         "down": {
@@ -298,7 +296,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "up": {
           "uv": [
@@ -307,7 +305,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "north": {
           "uv": [
@@ -316,7 +314,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "south": {
           "uv": [
@@ -325,7 +323,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "east": {
           "uv": [
@@ -334,7 +332,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         },
         "west": {
           "uv": [
@@ -343,7 +341,7 @@
             16,
             16
           ],
-          "texture": "#accent"
+          "texture": "#body"
         }
       }
     }

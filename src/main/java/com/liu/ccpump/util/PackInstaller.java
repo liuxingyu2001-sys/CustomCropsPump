@@ -17,8 +17,10 @@ import java.util.jar.JarFile;
 
 /**
  * 把 jar 内自带的 CraftEngine 资源包复制到 plugins/CraftEngine/resources/ccpump/。
- * 复制 craftengine/ccpump/ 下的全部文件（水管变体模型较多，不再维护固定清单），
- * 但不会删除用户自己添加的文件。
+ * 复制 craftengine/ccpump/ 下的全部文件，但不会删除用户自己添加的文件。
+ *
+ * <p>水泵/水管的方块状态借用原版仙人掌（auto_state: cactus），
+ * 但外观用自带的铜管模型，所以包里既有配置也有模型 JSON。
  */
 public final class PackInstaller {
 
@@ -111,9 +113,12 @@ public final class PackInstaller {
                     "pack.yml",
                     "configuration/items.yml",
                     "configuration/categories.yml",
-                    "configuration/pipe_variants.yml",
                     "resourcepack/assets/ccpump/models/block/water_pump.json",
-                    "resourcepack/assets/ccpump/models/block/water_pipe.json"
+                    "resourcepack/assets/ccpump/models/block/water_pipe.json",
+                    "resourcepack/assets/ccpump/models/block/pipe/water_pipe_straight_ew.json",
+                    "resourcepack/assets/ccpump/models/block/pipe/water_pipe_straight_ns.json",
+                    "resourcepack/assets/ccpump/models/block/pipe/water_pipe_vertical.json",
+                    "resourcepack/assets/ccpump/models/block/pipe/water_pipe_cross.json"
             ));
         }
         return result;

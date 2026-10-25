@@ -85,8 +85,7 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
         for (PumpConfig pumpConfig : configManager.pumps()) {
             register(pumpConfig.item(), true);
         }
-        // 水管有 64 个按连接方向切换外观的变体物品，全部要注册，
-        // 否则切换外观后 CustomCrops 找不到方块类型，右键/破坏会失效。
+        // 水管只有一种方块，不需要额外的变体 ID。
         for (String pipeItem : configManager.pipeItems()) {
             register(pipeItem, false);
         }

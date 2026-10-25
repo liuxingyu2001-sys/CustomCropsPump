@@ -9,7 +9,6 @@ import com.liu.ccpump.data.Network;
 import com.liu.ccpump.data.PipeInstance;
 import com.liu.ccpump.data.PumpInstance;
 import net.momirealms.customcrops.api.core.ExistenceForm;
-import net.momirealms.customcrops.api.core.FurnitureRotation;
 import net.momirealms.customcrops.api.core.block.SprinklerBlock;
 import net.momirealms.customcrops.api.core.mechanic.sprinkler.SprinklerConfig;
 import net.momirealms.customcrops.api.core.world.CustomCropsBlockState;
@@ -21,6 +20,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.Waterlogged;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.EquipmentSlot;
@@ -64,11 +64,11 @@ public final class PumpManager {
     private final Map<BlockKey, PipeInstance> pipes = new LinkedHashMap<>();
     private final Map<String, Set<Pos3>> pipesByWorld = new HashMap<>();
 
-    /** 已确认存在的连接变体物品，避免每次都去查物品表。 */
+    /** 已确认存在的形态方块，避免每次都去查物品表。 */
     private final Set<String> knownPipeVariants = new HashSet<>();
-    /** 确认不存在的变体物品：静默跳过外观切换，避免刷屏。 */
+    /** 确认不存在的形态：静默跳过外观切换，避免刷屏。 */
     private final Set<String> missingPipeVariants = new HashSet<>();
-    /** 已提示过“缺少连接模型”的水管配置，避免重复告警。 */
+    /** 已提示过“缺少形态”的水管配置，避免重复告警。 */
     private final Set<String> warnedPipeVariants = new HashSet<>();
 
     private long pipeVersion;
@@ -119,6 +119,8 @@ public final class PumpManager {
 
         PipeInstance existing = pipes.get(key);
         if (existing != null && existing.typeKey().equals(pipeConfig.key())) {
+            // 已经是同一种水管：仍然刷新一次连接状态，避免“放手后连接没更新”
+            schedulePipeRefresh(key);
             return;
         }
         pipes.put(key, new PipeInstance(key, pipeConfig.key()));
@@ -302,7 +304,14 @@ public final class PumpManager {
                 "capacity", String.valueOf(pumpConfig.capacity()));
     }
 
-    public void interactPipe(Player player, Location location) {
+    /**
+     * 右键水管。
+     *
+     * <p>手持水管时把新水管接到点击的那个面上（原版做不到这一点：方块右键
+     * 的目标是水管自己，原版只会尝试把方块塞进同一格）。手持其它物品时
+     * 只刷新一次连接状态，不发任何提示。
+     */
+    public void interactPipe(Player player, Location location, BlockFace face) {
         BlockKey key = BlockKey.of(location);
         PipeInstance pipe = pipes.get(key);
         if (pipe == null) {
@@ -315,9 +324,68 @@ public final class PumpManager {
             config.messages().send(player, "no-permission");
             return;
         }
-        // 洒水器可能是刚放下的，顺便校正一次外观。
+
+        ItemStack hand = player.getInventory().getItemInMainHand();
+        String handItem = plugin.customCrops().getItemManager().id(hand);
+        PipeConfig handPipe = handItem == null ? null : config.pipeByItem(handItem);
+        if (handPipe != null) {
+            tryPlacePipeAgainst(player, key, face, handPipe);
+            return;
+        }
+
         // 右键水管不显示任何提示：这里刻意不发消息。
         schedulePipeRefresh(key);
+    }
+
+    /**
+     * 把手持的水管放到 {@code key} 的 {@code face} 那一面上。
+     *
+     * <p>只在目标位置为空、且区块已加载时放置；放置后立刻交给
+     * {@code placePipe} 走正常的注册流程，连接状态随之刷新。
+     */
+    private void tryPlacePipeAgainst(Player player, BlockKey key, BlockFace face, PipeConfig pipeConfig) {
+        if (face == null || player.getGameMode() == GameMode.SPECTATOR) {
+            return;
+        }
+        World world = Bukkit.getWorld(key.world());
+        if (world == null) {
+            return;
+        }
+        int[] offset = switch (face) {
+            case EAST -> new int[]{1, 0, 0};
+            case WEST -> new int[]{-1, 0, 0};
+            case UP -> new int[]{0, 1, 0};
+            case DOWN -> new int[]{0, -1, 0};
+            case SOUTH -> new int[]{0, 0, 1};
+            case NORTH -> new int[]{0, 0, -1};
+            default -> null;
+        };
+        if (offset == null) {
+            return;
+        }
+        BlockKey target = key.offset(offset[0], offset[1], offset[2]);
+        if (!isChunkLoaded(world, target)) {
+            return;
+        }
+        Block block = target.toLocation(world).getBlock();
+        if (!block.getType().isAir()) {
+            // 目标格被占：交给原版流程（可能是在叠加其它方块）
+            return;
+        }
+        Location placeLocation = target.toLocation(world);
+        try {
+            plugin.customCrops().getItemManager().placeBlock(placeLocation, pipeConfig.item());
+        } catch (Throwable throwable) {
+            plugin.getLogger().warning("右键水管放置新水管失败（" + target + "）: "
+                    + throwable.getMessage());
+            return;
+        }
+        placePipe(placeLocation, pipeConfig.item());
+        // 生存模式消耗一个
+        if (player.getGameMode() == GameMode.SURVIVAL) {
+            ItemStack hand = player.getInventory().getItemInMainHand();
+            hand.setAmount(hand.getAmount() - 1);
+        }
     }
 
     private PipeInstance registerExistingPipe(BlockKey key) {
@@ -343,15 +411,29 @@ public final class PumpManager {
     // ------------------------------------------------------------------
 
     /**
-     * 计算一根水管应该显示的连接掩码：相邻的水泵、水管、洒水器都算连接。
-     * 位顺序与 DIRECTIONS 一致：东、西、上、下、南、北。
+     * 计算一根水管应该显示的连接掩码。
+     *
+     * <p>水平与垂直是两套互不相通的管网，连通规则：
+     * <ul>
+     *   <li>水平方向（东西南北）：相邻的水泵 / 水管 / 洒水器都算连接；</li>
+     *   <li>垂直方向（上下）：只有相邻的水管算连接，水泵和洒水器都不接，
+     *       因此竖管自成一路，不会和平面管网串起来。</li>
+     * </ul>
+     *
+     * <p>位顺序与 DIRECTIONS 一致：东、西、上、下、南、北。
      */
     public int connectedMask(BlockKey key) {
         int mask = 0;
         for (int i = 0; i < DIRECTIONS.length; i++) {
             int[] direction = DIRECTIONS[i];
+            boolean vertical = direction[1] != 0;
             BlockKey neighbor = key.offset(direction[0], direction[1], direction[2]);
-            if (pipes.containsKey(neighbor) || pumps.containsKey(neighbor)
+            if (vertical) {
+                // 垂直方向只认水管，水泵/洒水器不算，避免竖管接到平面管网上
+                if (pipes.containsKey(neighbor)) {
+                    mask |= MASK_BITS[i];
+                }
+            } else if (pipes.containsKey(neighbor) || pumps.containsKey(neighbor)
                     || isSprinklerKey(neighbor)) {
                 mask |= MASK_BITS[i];
             }
@@ -375,7 +457,10 @@ public final class PumpManager {
     }
 
     /**
-     * 把一根水管切换成对应的连接模型。已经正确时什么都不做。
+     * 水管只有一种外观（仙人掌方块），不再按连接方向切换模型。
+     *
+     * <p>保留这个方法是为了兼容外部（校验循环、监听器）的调用点，
+     * 现在它只在调试模式里打印当前连接掩码，便于排查连通问题。
      */
     public void refreshPipeAppearance(BlockKey key) {
         PipeInstance pipe = pipes.get(key);
@@ -404,41 +489,17 @@ public final class PumpManager {
         }
         Location location = key.toLocation(world);
         try {
-            FurnitureRotation rotation = plugin.customCrops().getItemManager()
-                    .remove(location, ExistenceForm.FURNITURE);
-            plugin.customCrops().getItemManager()
-                    .place(location, ExistenceForm.FURNITURE, desired, rotation);
-            if (furnitureId(key, world) == null) {
-                // 形态家具定义缺失（或放置失败）：恢复原样，别把水管弄丢
-                missingPipeVariants.add(desired);
-                plugin.customCrops().getItemManager()
-                        .place(location, ExistenceForm.FURNITURE, current, rotation);
-                if (warnedPipeVariants.add(pipeConfig.key())) {
-                    plugin.getLogger().warning("水管形态家具 " + desired
-                            + " 没有对应的定义，已恢复原外观。请检查资源包里的物品配置。");
-                }
+            // 方块形态：直接把这一格换成目标形态的方块
+            plugin.customCrops().getItemManager().placeBlock(location, desired);
+            if (!desired.equals(blockId(key, world))) {
+                // 切换失败：恢复原样，别把水管弄丢
+                plugin.customCrops().getItemManager().placeBlock(location, current);
                 return;
             }
             debug(() -> "水管外观 " + key + " -> " + desired);
         } catch (Throwable throwable) {
             plugin.getLogger().warning("切换水管外观失败（" + key + "）: " + throwable.getMessage());
         }
-    }
-
-    /**
-     * 延迟一 tick 刷新该方块自己以及 6 个相邻水管的外观，避免在放置事件里重入。
-     */
-    public void schedulePipeRefresh(BlockKey key) {
-        List<BlockKey> targets = new ArrayList<>(7);
-        targets.add(key);
-        for (int[] direction : DIRECTIONS) {
-            targets.add(key.offset(direction[0], direction[1], direction[2]));
-        }
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
-            for (BlockKey target : targets) {
-                refreshPipeAppearance(target);
-            }
-        });
     }
 
     private boolean variantAvailable(PipeConfig pipeConfig, String variantId) {
@@ -460,11 +521,26 @@ public final class PumpManager {
         }
         missingPipeVariants.add(variantId);
         if (warnedPipeVariants.add(pipeConfig.key())) {
-            plugin.getLogger().warning("找不到水管连接模型 " + variantId
-                    + "，水管将保持原样。请确认已安装插件自带的 CraftEngine 资源包"
-                    + "（craftengine-pack.overwrite: true 或删除旧 ccpump 目录后重启）。");
+            plugin.getLogger().warning("找不到水管形态 " + variantId
+                    + "，水管将保持原样。请确认已安装插件自带的 CraftEngine 资源包。");
         }
         return false;
+    }
+
+    /**
+     * 延迟一 tick 刷新该方块自己以及 6 个相邻水管的外观，避免在放置事件里重入。
+     */
+    public void schedulePipeRefresh(BlockKey key) {
+        List<BlockKey> targets = new ArrayList<>(7);
+        targets.add(key);
+        for (int[] direction : DIRECTIONS) {
+            targets.add(key.offset(direction[0], direction[1], direction[2]));
+        }
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            for (BlockKey target : targets) {
+                refreshPipeAppearance(target);
+            }
+        });
     }
 
     // ------------------------------------------------------------------
@@ -861,7 +937,7 @@ public final class PumpManager {
      * validate-interval 后删掉记录（表现就是放一会儿再右键没反应）。
      */
     private boolean isStillThere(BlockKey key, World world, PumpConfig pumpConfig) {
-        String currentId = furnitureId(key, world);
+        String currentId = blockId(key, world);
         if (currentId == null) {
             return false;
         }
@@ -870,16 +946,15 @@ public final class PumpManager {
     }
 
     /**
-     * 读该位置的家具 ID；不是本插件的水泵/水管时返回 null。
+     * 读该位置的自定义方块 ID；不是本插件的水泵/水管时返回 null。
+     *
+     * <p>水泵与水管都是 CraftEngine 自定义方块（{@code block_item}），
+     * 所以这里必须用 {@code ExistenceForm.BLOCK}。
      */
     private String blockId(BlockKey key, World world) {
-        return furnitureId(key, world);
-    }
-
-    private String furnitureId(BlockKey key, World world) {
         try {
             return plugin.customCrops().getItemManager()
-                    .id(key.toLocation(world), ExistenceForm.FURNITURE);
+                    .id(key.toLocation(world), ExistenceForm.BLOCK);
         } catch (Throwable throwable) {
             return null;
         }
@@ -903,7 +978,7 @@ public final class PumpManager {
     }
 
     /**
-     * 重载后清掉“变体是否存在”的缓存：资源包可能刚刚更新。
+     * 重载后清掉“形态是否存在”的缓存：资源包可能刚刚更新。
      */
     public void clearAppearanceCache() {
         knownPipeVariants.clear();

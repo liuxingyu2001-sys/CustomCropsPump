@@ -56,7 +56,10 @@ public final class PumpPipeBlock extends AbstractCustomCropsBlock {
             // 右键水泵只应该开界面/充能，而不是顺手在旁边搭一块。
             event.setCancelled(true);
         } else {
-            plugin.pumpManager().interactPipe(event.player(), location);
+            plugin.pumpManager().interactPipe(event.player(), location, event.clickedBlockFace());
+            // 手持水管右键水管时，由 interactPipe 负责把新水管放到点击的那个面上，
+            // 这里必须拦掉原版放置，否则原版会试图把水管塞进脚下这一格。
+            event.setCancelled(true);
         }
     }
 
