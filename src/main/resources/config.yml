@@ -1,0 +1,125 @@
+# ============================================================
+#  CustomCropsPump 配置文件
+#
+#  水泵会从附近的水源方块抽水，再通过相邻的水管把水自动送给
+#  相连的 CustomCrops 洒水器。
+#
+#  连接规则（6 方向，上下左右前后）：
+#    水泵 —— 水管 —— 水管 —— 洒水器
+#    水泵 —— 洒水器（水泵直接贴着洒水器也可以）
+#  斜角不算连接；洒水器不能继续当作管道延伸。
+# ============================================================
+
+# 主循环间隔（tick）。20 tick = 1 秒。建议 10~40。
+tick-interval: 20
+
+# 自动保存间隔（tick）。0 = 只在关服时保存。
+save-interval: 6000
+
+# 每隔多少 tick 重新检测一次“附近有没有水源方块”。
+source-check-interval: 40
+
+# 每隔多少 tick 校验一次水泵/水管家具是否还存在。
+# 被爆炸、WorldEdit 等非玩家方式移除后，最多这么久会被自动清理。
+validate-interval: 1200
+
+# 管网（BFS）缓存时间（tick）。
+network-cache-ticks: 100
+
+# 输出调试日志到控制台。
+debug: false
+
+# 如果你使用 CraftEngine，插件启动时会把自带的简易铜质模型包
+# 复制到 plugins/CraftEngine/resources/ccpump/。
+# 之后执行 /ce reload 即可生效（首次建议重启服务器）。
+craftengine-pack:
+  auto-install: true
+  # true = 覆盖已经存在的同名文件（会覆盖你对模型做的修改）
+  overwrite: false
+
+# ------------------------------------------------------------
+# 动力/充能。
+#
+# 水泵实际工作时会消耗动力；动力为 0 时停止抽水和补水。
+# 右键水泵，手持下面 fuels 里的物品即可充能。
+# blocked-items 优先级高于 fuels，用来明确禁止铁锭/金锭
+# （这两种物品在部分服务器上可以刷取）。
+# ------------------------------------------------------------
+charge:
+  fuels:
+    redstone:
+      item: minecraft:redstone
+      amount: 50
+    lapis_lazuli:
+      item: minecraft:lapis_lazuli
+      amount: 100
+    raw_iron:
+      item: minecraft:raw_iron
+      amount: 200
+    raw_gold:
+      item: minecraft:raw_gold
+      amount: 250
+    diamond:
+      item: minecraft:diamond
+      amount: 1000
+  blocked-items:
+    - minecraft:iron_ingot
+    - minecraft:gold_ingot
+
+# ------------------------------------------------------------
+# 水泵定义。可以复制多份做不同等级的水泵。
+# 每台水泵的 item 必须是一个真实的家具/方块 ID（CraftEngine 等提供者）。
+# ------------------------------------------------------------
+pumps:
+  water_pump:
+    item: ccpump:water_pump
+
+    # 水箱容量
+    capacity: 12
+    # 每个主循环从水源抽取的水量
+    pump-rate: 2
+    # 每个主循环最多给“单个洒水器”补多少水
+    push-rate: 2
+    # 右键水桶一次补充的水量
+    bucket-amount: 4
+    # 动力容量。0 = 不需要动力（无限动力）
+    charge-capacity: 1000
+    # 每完成一次实际工作（抽水或补水）消耗的动力
+    charge-per-cycle: 1
+    # 是否允许潜行 + 右键开关水泵
+    allow-toggle: true
+
+    source:
+      # true  = 必须在 radius 范围内找到水源方块
+      # false = 无限水，不需要水源
+      required: true
+      # 检测半径（以水泵方块为中心的立方体范围）
+      radius: 2
+      # true = 抽水时真的消耗一个水源方块（默认不消耗，避免抽干池塘）
+      consume: false
+
+    network:
+      # 一台水泵最多带多少根水管
+      max-pipes: 64
+      # 一台水泵最多同时给多少个洒水器补水
+      max-sprinklers: 16
+      # 水泵到最远水管/洒水器的距离（方块，直线距离）
+      max-distance: 32
+
+    effects:
+      enabled: true
+      # Bukkit Particle 名称
+      particle: SPLASH
+      # 声音 key（1.21+ 支持字符串）
+      sound: minecraft:block.water.ambient
+      volume: 0.35
+      pitch: 1.2
+      # 特效间隔（tick）
+      interval: 40
+
+# ------------------------------------------------------------
+# 水管定义。水管只是“管道”，本身不抽水也不储水。
+# ------------------------------------------------------------
+pipes:
+  water_pipe:
+    item: ccpump:water_pipe

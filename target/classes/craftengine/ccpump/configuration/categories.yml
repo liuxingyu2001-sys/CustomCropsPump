@@ -1,0 +1,10 @@
+categories:
+  ccpump:main:
+    name: "<!i><gold>CustomCropsPump</gold>"
+    lore: []
+    hidden: true
+    priority: 4
+    icon: ccpump:water_pump
+    list:
+      - ccpump:water_pump
+      - ccpump:water_pipe

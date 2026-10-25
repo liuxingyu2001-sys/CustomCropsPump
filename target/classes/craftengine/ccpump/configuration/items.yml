@@ -1,0 +1,82 @@
+items:
+  ccpump:water_pump:
+    material: paper
+    data:
+      item-name: <!i><gold>水泵</gold>
+    model: ccpump:block/water_pump
+    behavior:
+      type: furniture_item
+      rules:
+        ground:
+          rotation: four
+          alignment: center
+      ignore-placer: false
+      ignore-entities: false
+      furniture:
+        settings:
+          item: ccpump:water_pump
+          sounds:
+            break: minecraft:block.copper.break
+            place: minecraft:block.copper.place
+        variants:
+          ground:
+            loot-spawn-offset: 0,0.5,0
+            elements:
+              - item: ccpump:water_pump
+                display-transform: NONE
+                billboard: FIXED
+                translation: 0,0.5,0
+            hitboxes:
+              - type: interaction
+                can-use-item-on: false
+                can-be-hit-by-projectile: false
+                blocks-building: false
+                position: 0,0,0
+                scale: 0.9,0.9
+                interactive: true
+                invisible: false
+        loot:
+          template: default:loot_table/basic
+          arguments:
+            item: ccpump:water_pump
+
+  ccpump:water_pipe:
+    material: paper
+    data:
+      item-name: <!i><gold>水管</gold>
+    model: ccpump:block/water_pipe
+    behavior:
+      type: furniture_item
+      rules:
+        ground:
+          rotation: four
+          alignment: center
+      ignore-placer: false
+      ignore-entities: false
+      furniture:
+        settings:
+          item: ccpump:water_pipe
+          sounds:
+            break: minecraft:block.copper.break
+            place: minecraft:block.copper.place
+        variants:
+          ground:
+            loot-spawn-offset: 0,0.5,0
+            elements:
+              - item: ccpump:water_pipe
+                display-transform: NONE
+                billboard: FIXED
+                translation: 0,0.5,0
+            hitboxes:
+              - type: interaction
+                can-use-item-on: false
+                can-be-hit-by-projectile: false
+                blocks-building: false
+                position: 0,0,0
+                scale: 0.9,0.55
+                interactive: true
+                invisible: false
+        loot:
+          template: default:loot_table/basic
+          arguments:
+            item: ccpump:water_pipe

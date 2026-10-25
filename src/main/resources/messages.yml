@@ -1,0 +1,42 @@
+# CustomCropsPump 语言文件
+# 支持 & 颜色代码与 {占位符}。
+
+prefix: "&b[水泵] &r"
+
+no-permission: "&c你没有权限使用这个命令。"
+player-only: "&c该命令只能由玩家执行。"
+reload-success: "&a配置与语言文件已重载。"
+save-success: "&a数据已保存到 data.yml。"
+give-success: "&a已给予 &e{player} &a物品 &e{item} &ax{amount}。"
+give-self: "&a已获得 &e{item} &ax{amount}。"
+item-not-found: "&c无法生成物品 &e{item}&c：请确认 CraftEngine 等物品提供者已加载该 ID。"
+player-not-found: "&c找不到在线玩家 &e{player}&c。"
+unknown-type: "&c未知类型 &e{type}&c。可用：&e{types}"
+usage: |-
+  &b/ccpump reload &7- 重载配置
+  &b/ccpump save &7- 立即保存数据
+  &b/ccpump info &7- 查看已登记的水泵/水管数量
+  &b/ccpump give <水泵类型|水管类型> [玩家] [数量] &7- 给予物品
+info: "&7水泵 &b{pumps} &7台 &8| &7水管 &b{pipes} &7根 &8| &7世界 &b{worlds} &7个"
+
+pump-info: "&7水量 &b{water}&7/&b{capacity} &8| &7动力 &b{charge} &8| &7水管 &b{pipes} &8| &7洒水器 &b{sprinklers} &8| &7水源 {source} &8| &7状态 {state}"
+pipe-info: "&7同网水管 &b{pipes} &8| &7连接水泵 &b{pumps} &8| &7可达洒水器 &b{sprinklers} &8| &7状态 {state}"
+
+source-yes: "&a有"
+source-no: "&c无"
+source-infinite: "&a无限"
+charge-infinite: "&a无限"
+state-enabled: "&a开启"
+state-disabled: "&c关闭"
+pipe-connected: "&a已接入"
+pipe-disconnected: "&c未接入水泵"
+
+pump-toggled-on: "&a水泵已开启。"
+pump-toggled-off: "&c水泵已关闭。"
+pump-full: "&e水箱已满（{water}/{capacity}）。"
+pump-added-water: "&a已加入 &b{amount} &a单位水（{water}/{capacity}）。"
+pump-charged: "&a已加入 &b{amount} &a点动力（{charge}/{capacity}）。"
+pump-charge-full: "&e动力已满（{charge}/{capacity}）。"
+pump-charge-disabled: "&7这台水泵不需要充能。"
+pump-no-charge: "&c水泵没有动力。&7右键填充红石、粗铁、粗金、青金石或钻石。"
+pump-fuel-blocked: "&c不能使用 &e{item} &c充能：铁锭/金锭可以刷取，请用粗铁、粗金、红石、青金石或钻石。"
