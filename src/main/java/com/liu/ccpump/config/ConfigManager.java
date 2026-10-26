@@ -43,6 +43,8 @@ public final class ConfigManager {
 
     private final Map<String, PumpConfig> pumps = new LinkedHashMap<>();
     private final Map<String, PumpConfig> pumpsByItem = new HashMap<>();
+    private final Map<String, MachineConfig> machines = new LinkedHashMap<>();
+    private final Map<String, MachineConfig> machinesByItem = new HashMap<>();
     private final Map<String, PipeConfig> pipes = new LinkedHashMap<>();
     private final Map<String, PipeConfig> pipesByItem = new HashMap<>();
 
@@ -60,6 +62,8 @@ public final class ConfigManager {
         pumpsByItem.clear();
         pipes.clear();
         pipesByItem.clear();
+        machines.clear();
+        machinesByItem.clear();
         fuels.clear();
         blockedFuels.clear();
 
@@ -90,6 +94,7 @@ public final class ConfigManager {
         }
         loadPumps(config.getConfigurationSection("pumps"));
         loadPipes(config.getConfigurationSection("pipes"));
+        loadMachines(config.getConfigurationSection("machines"));
         this.messages = Messages.load(plugin);
 
         if (pumps.isEmpty()) {
@@ -126,6 +131,8 @@ public final class ConfigManager {
             int chargeCapacity = Math.max(0, sec.getInt("charge-capacity", 1000));
             int chargePerCycle = chargeCapacity <= 0 ? 0 : Math.max(1, sec.getInt("charge-per-cycle", 1));
             boolean allowToggle = sec.getBoolean("allow-toggle", true);
+            // 耐久：每完成一次实际工作消耗 1 点，0 表示不做耐久限制
+            int durability = Math.max(0, sec.getInt("durability", 86400));
 
             boolean sourceRequired = sec.getBoolean("source.required", true);
             int sourceRadius = Math.max(0, sec.getInt("source.radius", 2));
@@ -151,6 +158,7 @@ public final class ConfigManager {
                     bucketAmount,
                     chargeCapacity,
                     chargePerCycle,
+                    durability,
                     allowToggle,
                     new PumpConfig.Source(sourceRequired, sourceRadius, sourceConsume),
                     new PumpConfig.Network(maxPipes, maxSprinklers, maxDistance),
@@ -159,6 +167,137 @@ public final class ConfigManager {
             pumps.put(key, pump);
             pumpsByItem.put(item, pump);
         }
+    }
+
+    /**
+     * 读取机器配置（收割机 / 洒水机 / 施肥机）。
+     *
+     * <p>三种机器共用同一套解析：{@code type} 决定行为，其余字段按需读取，
+     * 用不上的字段保持默认值。某一种机器整体缺失时补上内置默认值，
+     * 避免升级后机器物品直接不可用；只缺其中一段时只补那一段。
+     */
+    private void loadMachines(ConfigurationSection section) {
+        if (section != null) {
+            for (String key : section.getKeys(false)) {
+                ConfigurationSection sec = section.getConfigurationSection(key);
+                if (sec == null) {
+                    continue;
+                }
+                MachineKind kind = MachineKind.byId(sec.getString("type", key));
+                if (kind == null) {
+                    plugin.getLogger().warning("机器 " + key + " 的 type 无法识别（"
+                            + sec.getString("type") + "），已跳过；可选值: harvester / sprinkler / fertilizer。");
+                    continue;
+                }
+                String item = sec.getString("item", "").trim();
+                if (item.isEmpty()) {
+                    plugin.getLogger().warning("机器 " + key + "（" + kind.displayName() + "）没有配置 item，已跳过。");
+                    continue;
+                }
+                if (machinesByItem.containsKey(item)) {
+                    plugin.getLogger().warning("机器物品 ID 重复: " + item + "（" + key + "），已跳过。");
+                    continue;
+                }
+                MachineConfig machine = parseMachine(key, kind, item, sec);
+                machines.put(key, machine);
+                machinesByItem.put(item, machine);
+            }
+        }
+        for (MachineKind kind : MachineKind.values()) {
+            if (machines.values().stream().anyMatch(machine -> machine.kind() == kind)) {
+                continue;
+            }
+            MachineConfig fallback = defaultMachine(kind);
+            machines.putIfAbsent(fallback.key(), fallback);
+            machinesByItem.put(fallback.item(), fallback);
+            plugin.getLogger().warning("config.yml 里没有 " + kind.displayName()
+                    + "（type: " + kind.id() + "），已使用内置默认配置。");
+        }
+    }
+
+    private MachineConfig parseMachine(String key, MachineKind kind, String item, ConfigurationSection sec) {
+        int radius = clamp(sec.getInt("radius", switch (kind) {
+            case HARVESTER -> 4;
+            case SPRINKLER, FERTILIZER -> 3;
+        }), 1, 16);
+        int verticalRadius = clamp(sec.getInt("vertical-radius", switch (kind) {
+            case HARVESTER -> 2;
+            case SPRINKLER, FERTILIZER -> 1;
+        }), 0, 8);
+        int cycle = Math.max(5, sec.getInt("cycle", switch (kind) {
+            case HARVESTER, SPRINKLER -> 40;
+            case FERTILIZER -> 100;
+        }));
+        int maxPerCycle = clamp(sec.getInt("max-per-cycle", switch (kind) {
+            case HARVESTER -> 6;
+            case SPRINKLER -> 8;
+            case FERTILIZER -> 4;
+        }), 1, 64);
+        int chargeCapacity = Math.max(0, sec.getInt("charge-capacity", switch (kind) {
+            case HARVESTER -> 2400;
+            case SPRINKLER -> 1200;
+            case FERTILIZER -> 1600;
+        }));
+        int chargePerAction = chargeCapacity <= 0 ? 0 : Math.max(1,
+                sec.getInt("charge-per-action", switch (kind) {
+                    case HARVESTER -> 2;
+                    case SPRINKLER -> 1;
+                    case FERTILIZER -> 4;
+                }));
+        int bufferSlots = clamp(sec.getInt("buffer-slots", switch (kind) {
+            case HARVESTER -> 18;
+            case SPRINKLER -> 0;
+            case FERTILIZER -> 9;
+        }), 0, 45);
+        boolean acceptsInput = sec.getBoolean("accepts-input", kind == MachineKind.FERTILIZER);
+        MachineConfig.Water water = kind == MachineKind.SPRINKLER
+                ? parseWater(sec.getConfigurationSection("water"))
+                : MachineConfig.Water.NONE;
+        MachineConfig.Targets targets = new MachineConfig.Targets(
+                sec.getBoolean("custom-crops", kind != MachineKind.SPRINKLER),
+                sec.getBoolean("vanilla-crops", kind == MachineKind.HARVESTER),
+                sec.getBoolean("farmland", kind == MachineKind.SPRINKLER));
+        return new MachineConfig(key, kind, item, radius, verticalRadius, cycle, maxPerCycle,
+                chargeCapacity, chargePerAction, bufferSlots, acceptsInput, water, targets);
+    }
+
+    private MachineConfig.Water parseWater(ConfigurationSection sec) {
+        if (sec == null) {
+            plugin.getLogger().warning("洒水机缺少 water 段，已使用内置默认水箱配置。");
+            return defaultWater();
+        }
+        int capacity = Math.max(1, sec.getInt("capacity", 16));
+        int perAction = clamp(sec.getInt("per-action", 1), 1, 64);
+        int refill = Math.max(0, sec.getInt("refill", 1));
+        int bucketAmount = Math.max(1, sec.getInt("bucket-amount", 8));
+        boolean sourceRequired = sec.getBoolean("source.required", true);
+        int sourceRadius = Math.max(1, sec.getInt("source.radius", 2));
+        boolean sourceConsume = sec.getBoolean("source.consume", false);
+        return new MachineConfig.Water(capacity, perAction, refill, bucketAmount,
+                new MachineConfig.Water.Source(sourceRequired, sourceRadius, sourceConsume));
+    }
+
+    private MachineConfig defaultMachine(MachineKind kind) {
+        return switch (kind) {
+            case HARVESTER -> new MachineConfig("harvester", kind, "ccpump:harvester",
+                    4, 2, 40, 6, 2400, 2, 18, false,
+                    MachineConfig.Water.NONE, new MachineConfig.Targets(true, true, false));
+            case SPRINKLER -> new MachineConfig("sprinkler_machine", kind, "ccpump:sprinkler_machine",
+                    3, 1, 40, 8, 1200, 1, 0, false,
+                    defaultWater(), new MachineConfig.Targets(false, false, true));
+            case FERTILIZER -> new MachineConfig("fertilizer_machine", kind, "ccpump:fertilizer_machine",
+                    3, 1, 100, 4, 1600, 4, 9, true,
+                    MachineConfig.Water.NONE, new MachineConfig.Targets(true, false, false));
+        };
+    }
+
+    private static MachineConfig.Water defaultWater() {
+        return new MachineConfig.Water(16, 1, 1, 8,
+                new MachineConfig.Water.Source(true, 2, false));
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private void loadPipes(ConfigurationSection section) {
@@ -360,6 +499,26 @@ public final class ConfigManager {
         return packOverwrite;
     }
 
+    /** 全部机器配置（按配置顺序）。 */
+    public Collection<MachineConfig> machines() {
+        return machines.values();
+    }
+
+    /** 按配置键取机器；不存在返回 null。 */
+    public MachineConfig machine(String key) {
+        return machines.get(key);
+    }
+
+    /** 按物品 ID 反查机器；不是机器物品返回 null。 */
+    public MachineConfig machineByItem(String item) {
+        return item == null ? null : machinesByItem.get(item);
+    }
+
+    /** 某一种机器的全部配置（可能有多个等级）。 */
+    public Collection<MachineConfig> machines(MachineKind kind) {
+        return machines.values().stream().filter(machine -> machine.kind() == kind).toList();
+    }
+
     public Messages messages() {
         return messages;
     }
@@ -380,6 +539,12 @@ public final class ConfigManager {
             return;
         }
         YamlConfiguration current = YamlConfiguration.loadConfiguration(file);
+        // 1.1.x 的收割机配置段已经改成 machines 段，老文件里残留的 harvesters 段
+        // 不再有任何作用，顺手清掉，避免玩家以为是改这里生效。
+        if (current.isConfigurationSection("harvesters")) {
+            current.set("harvesters", null);
+            plugin.getLogger().info("已移除 config.yml 里过时的 harvesters 段（机器配置改到 machines 段）。");
+        }
         try (InputStream in = plugin.getResource("config.yml")) {
             if (in == null) {
                 return;

@@ -32,10 +32,14 @@ public final class PumpGuiListener implements Listener {
             if (!(event.getWhoClicked() instanceof Player player)) {
                 return;
             }
-            plugin.gui().handleClick(player, holder, rawSlot);
+            plugin.gui().handleClick(player, holder, event);
         } else if (event.getClick().isShiftClick()) {
-            // 禁止 shift 把物品塞进界面
+            // 禁止 shift 把物品塞进界面；只有投放槽例外（它会把燃料吃掉充能）
             event.setCancelled(true);
+            if (!(event.getWhoClicked() instanceof Player player)) {
+                return;
+            }
+            plugin.gui().handleClick(player, holder, event);
         }
     }
 

@@ -51,9 +51,8 @@ public final class PumpPipeBlock extends AbstractCustomCropsBlock {
         }
         Location location = LocationUtils.toBlockLocation(event.location());
         if (pump) {
-            plugin.pumpManager().interactPump(event.player(), location, event.hand(), event.itemInHand());
-            // 水泵是真实方块：拦掉后面的“用手里的方块放置”，
-            // 右键水泵只应该开界面/充能，而不是顺手在旁边搭一块。
+            // 水泵的右键统一由 PumpInteractListener 在 LOWEST 接管（开界面）。
+            // 这里只兜底拦掉原版放置，不重复开界面，避免一次右键弹两遍。
             event.setCancelled(true);
         } else {
             plugin.pumpManager().interactPipe(event.player(), location, event.clickedBlockFace());

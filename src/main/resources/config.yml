@@ -19,7 +19,7 @@ save-interval: 6000
 # 每隔多少 tick 重新检测一次“附近有没有水源方块”。
 source-check-interval: 40
 
-# 每隔多少 tick 校验一次水泵/水管家具是否还存在。
+# 每隔多少 tick 校验一次水泵/水管/机器方块是否还存在。
 # 被爆炸、WorldEdit 等非玩家方式移除后，最多这么久会被自动清理。
 validate-interval: 1200
 
@@ -41,7 +41,7 @@ craftengine-pack:
 # 动力/充能。
 #
 # 水泵实际工作时会消耗动力；动力为 0 时停止抽水和补水。
-# 右键水泵，手持下面 fuels 里的物品即可充能。
+# 右键水泵打开界面，把下面 fuels 里的物品放进投放槽即可充能。
 # blocked-items 优先级高于 fuels，用来明确禁止铁锭/金锭
 # （这两种物品在部分服务器上可以刷取）。
 # ------------------------------------------------------------
@@ -70,7 +70,7 @@ charge:
 
 # ------------------------------------------------------------
 # 水泵定义。可以复制多份做不同等级的水泵。
-# 每台水泵的 item 必须是一个真实的家具/方块 ID（CraftEngine 等提供者）。
+# 每台水泵的 item 必须是一个真实的方块 ID（CraftEngine 等提供者）。
 # ------------------------------------------------------------
 pumps:
   water_pump:
@@ -90,6 +90,17 @@ pumps:
     charge-capacity: 100
     # 每完成一次实际工作（抽水或补水）消耗的动力
     charge-per-cycle: 1
+    # 耐久：水泵每完成一次“实际工作”（抽水或补水）消耗 1 点。
+    # 掉到 0 时水泵方块消失，并掉落一个破损水泵；
+    # 破损水泵 + 1 组侦测器可以在工作台修成新的水泵。
+    #
+    # tick-interval: 20 时每秒约 1 个周期，所以：
+    #   86400  ≈ 连续工作 24 小时
+    #   432000 ≈ 连续工作 5 天
+    # 空转、停机、没水源都不磨损。
+    # 0 = 不做耐久限制。
+    durability: 86400
+
     # 是否允许潜行 + 右键开关水泵
     allow-toggle: true
 
@@ -105,7 +116,7 @@ pumps:
     network:
       # 一台水泵最多带多少根水管
       max-pipes: 64
-      # 一台水泵最多同时给多少个洒水器补水
+      # 一台水泵最多同时给多少个取水点补水（CustomCrops 洒水器 + 本插件的洒水机）
       max-sprinklers: 16
       # 水泵到最远水管/洒水器的距离（方块，直线距离）
       max-distance: 32
@@ -136,3 +147,113 @@ pipes:
     # 形态名：straight_ew（横-东西）、straight_ns（横-南北）、
     #         vertical（纵向）、cross（六面管子，端点/拐角/T 形/十字都用它）。
     variant-format: "{item}_{shape}"
+
+# ------------------------------------------------------------
+# 机器：收割机 / 洒水机 / 施肥机。
+#
+# 三台机器都是**方块**（CraftEngine 自定义方块），拿在手上右键地面放下，
+# 右键方块打开界面：投放充能、看仓储、开关机器。
+# 每台机器的差异只有 type：
+#   harvester  收割范围内的 CustomCrops 作物与原版作物（不自动补种）
+#   sprinkler  给范围内的 CustomCrops 花盆补水，顺带给原版耕地保湿
+#   fertilizer 把仓储里的肥料施给范围内的 CustomCrops 花盆
+#
+# 想加一台新机器：复制一段，改 key / type / item 即可，代码不用动。
+# ------------------------------------------------------------
+machines:
+  harvester:
+    type: harvester
+    # 放置/拆卸时使用的物品（拆下来掉的就是它）
+    item: ccpump:harvester
+
+    # 水平工作半径（格）。半径 4 = 9x9 的一片地
+    radius: 4
+    # 垂直范围：机器上方/下方各几格
+    vertical-radius: 2
+
+    # 工作周期（tick）。40 = 每 2 秒收割一批
+    cycle: 40
+    # 每个周期最多收割几株，防止一瞬间扫完整片田
+    max-per-cycle: 6
+
+    # 动力：容量与每株消耗。0 容量表示不需要充能。
+    # 换算：1 块红石 = 5 点 = 收割 2.5 株；满罐 2400 点 ≈ 1200 株。
+    # 一片 9x9（81 株）扫一遍约 162 点，也就是 33 块红石。
+    charge-capacity: 2400
+    charge-per-action: 2
+
+    # 内部仓储格数（9 的倍数最整齐，界面里按行显示）
+    buffer-slots: 18
+    # 收割机的仓储只出不进，玩家不能往里塞东西
+    accepts-input: false
+
+    # 收割范围
+    custom-crops: true
+    vanilla-crops: true
+
+  sprinkler_machine:
+    type: sprinkler
+    item: ccpump:sprinkler_machine
+
+    # 洒水机只管身边一圈花盆，不需要像收割机那么大
+    radius: 3
+    vertical-radius: 1
+    cycle: 40
+    # 每个周期最多浇几盆
+    max-per-cycle: 8
+
+    # 1 块红石 = 5 点 = 浇 5 盆
+    charge-capacity: 1200
+    charge-per-action: 1
+
+    # 洒水机没有仓储区
+    buffer-slots: 0
+
+    # 给 CustomCrops 花盆补水 / 给原版耕地保湿
+    custom-crops: true
+    vanilla-crops: false
+    farmland: true
+
+    # 水箱的三种加水方式（按优先级）：
+    #   1. 水管网络：把水管接到洒水机上（或直接贴着水泵），水泵每周期往里灌
+    #      pumps.*.push-rate 点，灌满为止——这是主水源；
+    #   2. 本地水源：见下面的 source，管网正在供水时自动让路；
+    #   3. 水桶：界面里往水箱图标上点水桶，一次 bucket-amount 点。
+    water:
+      # 水箱容量
+      capacity: 16
+      # 每浇一盆加多少水
+      per-action: 1
+      # 每个周期从附近水源抽多少水进水箱
+      refill: 1
+      # 界面里投一个水桶能加多少水
+      bucket-amount: 8
+      source:
+        # true = 身边要有水才抽得进；false = 凭空出水（不接水管时的兜底）
+        required: true
+        radius: 2
+        # true = 抽水会消耗水源方块（水池会被抽干）
+        consume: false
+
+  fertilizer_machine:
+    type: fertilizer
+    item: ccpump:fertilizer_machine
+
+    radius: 3
+    vertical-radius: 1
+    # 施肥慢一点，100 tick = 每 5 秒一次
+    cycle: 100
+    max-per-cycle: 4
+
+    # 1 块红石 = 5 点 = 施 1.25 次肥
+    charge-capacity: 1600
+    charge-per-action: 4
+
+    # 肥料仓储：界面下半部分就是放肥料的地方
+    buffer-slots: 9
+    # 施肥机的仓储可以往里放东西（只认 CustomCrops 肥料）
+    accepts-input: true
+
+    # 施肥机只管 CustomCrops 花盆
+    custom-crops: true
+    vanilla-crops: false

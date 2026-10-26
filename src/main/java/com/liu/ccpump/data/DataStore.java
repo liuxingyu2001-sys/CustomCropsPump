@@ -1,8 +1,11 @@
 package com.liu.ccpump.data;
 
 import com.liu.ccpump.CustomCropsPumpPlugin;
+import com.liu.ccpump.config.MachineConfig;
 import com.liu.ccpump.config.PumpConfig;
 import com.liu.ccpump.manager.PumpManager;
+import com.liu.ccpump.machine.MachineManager;
+import org.bukkit.inventory.ItemStack;
 
 import java.io.File;
 import java.sql.Connection;
@@ -39,6 +42,7 @@ public final class DataStore {
                 water   INTEGER NOT NULL,
                 charge  INTEGER NOT NULL,
                 enabled INTEGER NOT NULL,
+                wear    INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (world, x, y, z)
             )""";
 
@@ -52,9 +56,27 @@ public final class DataStore {
                 PRIMARY KEY (world, x, y, z)
             )""";
 
+    private static final String CREATE_MACHINES = """
+            CREATE TABLE IF NOT EXISTS machines (
+                world   TEXT    NOT NULL,
+                x       INTEGER NOT NULL,
+                y       INTEGER NOT NULL,
+                z       INTEGER NOT NULL,
+                type    TEXT    NOT NULL,
+                charge  INTEGER NOT NULL,
+                enabled INTEGER NOT NULL,
+                water   INTEGER NOT NULL DEFAULT 0,
+                buffer  BLOB,
+                PRIMARY KEY (world, x, y, z)
+            )""";
+
+    private static final String UPSERT_MACHINE = """
+            INSERT OR REPLACE INTO machines (world, x, y, z, type, charge, enabled, water, buffer)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""";
+
     private static final String UPSERT_PUMP = """
-            INSERT OR REPLACE INTO pumps (world, x, y, z, type, water, charge, enabled)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""";
+            INSERT OR REPLACE INTO pumps (world, x, y, z, type, water, charge, enabled, wear)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""";
 
     private static final String UPSERT_PIPE = """
             INSERT OR REPLACE INTO pipes (world, x, y, z, type)
@@ -74,7 +96,7 @@ public final class DataStore {
     /**
      * 建表并读入内存。数据库不可用时只告警，插件照常运行（关服不保存）。
      */
-    public void load(PumpManager manager) {
+    public void load(PumpManager manager, MachineManager machines) {
         File parent = file.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             plugin.getLogger().warning("无法创建插件数据目录: " + parent);
@@ -83,9 +105,13 @@ public final class DataStore {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(CREATE_PUMPS);
                 statement.execute(CREATE_PIPES);
+                migrateMachinesTable(connection);
+                statement.execute(CREATE_MACHINES);
+                addColumnIfMissing(connection, "pumps", "wear", "INTEGER NOT NULL DEFAULT 0");
             }
             loadPumps(connection, manager);
             loadPipes(connection, manager);
+            loadMachines(connection, machines);
             this.available = true;
         } catch (SQLException | RuntimeException error) {
             this.available = false;
@@ -93,9 +119,25 @@ public final class DataStore {
         }
     }
 
+    /**
+     * 给已存在的老库补列。
+     *
+     * <p>{@code CREATE TABLE IF NOT EXISTS} 不会给已经建好的表加字段，
+     * 所以升级插件后旧 {@code data.db} 会缺 {@code wear} 列，直接查就会
+     * {@code no such column}。这里逐列尝试一次，已经存在就跳过。
+     */
+    private void addColumnIfMissing(Connection connection, String table, String column, String definition) {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            plugin.getLogger().info("已为数据表 " + table + " 补上列 " + column + "。");
+        } catch (SQLException ignored) {
+            // 列已经存在：正常情况，不做任何处理
+        }
+    }
+
     private void loadPumps(Connection connection, PumpManager manager) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT world, x, y, z, type, water, charge, enabled FROM pumps");
+                "SELECT world, x, y, z, type, water, charge, enabled, wear FROM pumps");
              ResultSet rows = statement.executeQuery()) {
             while (rows.next()) {
                 String type = rows.getString("type");
@@ -113,6 +155,7 @@ public final class DataStore {
                         ? 0
                         : Math.min(capacity, Math.max(0, rows.getInt("charge"))));
                 instance.enabled(rows.getInt("enabled") != 0);
+                instance.wear(Math.max(0, rows.getInt("wear")));
                 manager.addLoadedPump(instance);
             }
         }
@@ -135,9 +178,74 @@ public final class DataStore {
     }
 
     /**
+     * 旧版（实体收割机）的 machines 表主键是 UUID，和“按方块坐标”的新表不兼容。
+     *
+     * <p>建表前先看表结构：有 {@code id} 列就是旧表，直接删掉重建。
+     * 旧表里只有开发期的测试数据，删掉不会影响玩家。
+     */
+    private void migrateMachinesTable(Connection connection) throws SQLException {
+        boolean legacy = false;
+        try (Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("PRAGMA table_info(machines)")) {
+            while (rows.next()) {
+                if ("id".equalsIgnoreCase(rows.getString("name"))) {
+                    legacy = true;
+                }
+            }
+        }
+        if (!legacy) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("DROP TABLE machines");
+        }
+        plugin.getLogger().warning("检测到旧版（实体收割机）机器数据表，已清理并改为按方块坐标记录。");
+    }
+
+    /**
+     * 读入机器记录。
+     *
+     * <p>只恢复数据，不碰方块：方块是否还在由 {@code MachineManager} 定期校验。
+     */
+    private void loadMachines(Connection connection, MachineManager manager) throws SQLException {
+        if (manager == null) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT world, x, y, z, type, charge, enabled, water, buffer FROM machines");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                String type = rows.getString("type");
+                MachineConfig machineConfig = plugin.configManager().machine(type);
+                if (machineConfig == null) {
+                    plugin.getLogger().warning("数据库中的机器类型 " + type + " 已不存在，已跳过该机器。");
+                    continue;
+                }
+                BlockKey key = new BlockKey(rows.getString("world"),
+                        rows.getInt("x"), rows.getInt("y"), rows.getInt("z"));
+                int slots = machineConfig.bufferSlots();
+                // 一定要按配置的格数先分配好：buffer 列是 NULL（还没存过东西）
+                // 的时候如果给个长度 0 的数组，机器就永远存不进任何物品。
+                ItemStack[] buffer = new ItemStack[slots];
+                byte[] raw = rows.getBytes("buffer");
+                if (raw != null) {
+                    ItemStack[] restored = MachineCodec.decode(raw, slots);
+                    System.arraycopy(restored, 0, buffer, 0, Math.min(restored.length, slots));
+                }
+                int capacity = machineConfig.chargeCapacity();
+                int charge = capacity <= 0 ? 0 : Math.min(capacity, Math.max(0, rows.getInt("charge")));
+                int water = Math.min(Math.max(0, machineConfig.water().capacity()),
+                        Math.max(0, rows.getInt("water")));
+                manager.addLoaded(new MachineData(key, type, buffer, charge, water,
+                        rows.getInt("enabled") != 0));
+            }
+        }
+    }
+
+    /**
      * 保存当前全部水泵/水管状态。整批写入在一个事务里完成，失败整体回滚。
      */
-    public void save(PumpManager manager) {
+    public void save(PumpManager manager, MachineManager machineManager) {
         Collection<PumpInstance> pumps = manager.pumpInstances();
         Collection<PipeInstance> pipes = manager.pipeInstances();
         try (Connection connection = open()) {
@@ -145,6 +253,9 @@ public final class DataStore {
             try {
                 savePumps(connection, pumps);
                 savePipes(connection, pipes);
+                if (machineManager != null) {
+                    saveMachines(connection, machineManager);
+                }
                 connection.commit();
                 this.available = true;
             } catch (SQLException | RuntimeException error) {
@@ -175,6 +286,7 @@ public final class DataStore {
                 insert.setInt(6, pump.water());
                 insert.setInt(7, pump.charge());
                 insert.setInt(8, pump.enabled() ? 1 : 0);
+                insert.setInt(9, pump.wear());
                 insert.addBatch();
             }
             insert.executeBatch();
@@ -193,6 +305,32 @@ public final class DataStore {
                 insert.setInt(3, key.y());
                 insert.setInt(4, key.z());
                 insert.setString(5, pipe.typeKey());
+                insert.addBatch();
+            }
+            insert.executeBatch();
+        }
+    }
+
+    private void saveMachines(Connection connection, MachineManager manager) throws SQLException {
+        try (Statement clear = connection.createStatement()) {
+            clear.execute("DELETE FROM machines");
+        }
+        Collection<MachineData> machines = manager.machines();
+        if (machines.isEmpty()) {
+            return;
+        }
+        try (PreparedStatement insert = connection.prepareStatement(UPSERT_MACHINE)) {
+            for (MachineData machine : machines) {
+                BlockKey key = machine.key();
+                insert.setString(1, key.world());
+                insert.setInt(2, key.x());
+                insert.setInt(3, key.y());
+                insert.setInt(4, key.z());
+                insert.setString(5, machine.typeKey());
+                insert.setInt(6, machine.charge());
+                insert.setInt(7, machine.enabled() ? 1 : 0);
+                insert.setInt(8, machine.water());
+                insert.setBytes(9, MachineCodec.encode(machine.buffer(), machine.bufferSlots()));
                 insert.addBatch();
             }
             insert.executeBatch();

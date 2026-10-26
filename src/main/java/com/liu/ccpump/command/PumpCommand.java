@@ -1,6 +1,7 @@
 package com.liu.ccpump.command;
 
 import com.liu.ccpump.CustomCropsPumpPlugin;
+import com.liu.ccpump.config.MachineConfig;
 import com.liu.ccpump.config.PipeConfig;
 import com.liu.ccpump.config.PumpConfig;
 import org.bukkit.Bukkit;
@@ -47,7 +48,7 @@ public final class PumpCommand implements CommandExecutor, TabCompleter {
                 if (!requireAdmin(sender)) {
                     return true;
                 }
-                plugin.dataStore().save(plugin.pumpManager());
+                plugin.dataStore().save(plugin.pumpManager(), plugin.machineManager());
                 plugin.configManager().messages().send(sender, "save-success");
                 return true;
             }
@@ -58,6 +59,7 @@ public final class PumpCommand implements CommandExecutor, TabCompleter {
                 plugin.configManager().messages().send(sender, "info",
                         "pumps", String.valueOf(plugin.pumpManager().pumpCount()),
                         "pipes", String.valueOf(plugin.pumpManager().pipeCount()),
+                        "machines", String.valueOf(plugin.machineManager().machineCount()),
                         "worlds", String.valueOf(plugin.pumpManager().worldCount()));
                 return true;
             }
@@ -84,11 +86,14 @@ public final class PumpCommand implements CommandExecutor, TabCompleter {
         String itemId = null;
         PumpConfig pumpConfig = plugin.configManager().pump(type);
         PipeConfig pipeConfig = plugin.configManager().pipe(type);
+        MachineConfig machineConfig = plugin.configManager().machine(type);
 
         if (pumpConfig != null) {
             itemId = pumpConfig.item();
         } else if (pipeConfig != null) {
             itemId = pipeConfig.item();
+        } else if (machineConfig != null) {
+            itemId = machineConfig.item();
         } else if (type.equalsIgnoreCase("pump") && plugin.configManager().pumps().size() == 1) {
             itemId = plugin.configManager().pumps().iterator().next().item();
         } else if (type.equalsIgnoreCase("pipe") && plugin.configManager().pipes().size() == 1) {
@@ -101,6 +106,9 @@ public final class PumpCommand implements CommandExecutor, TabCompleter {
                 types.add(config.key());
             }
             for (PipeConfig config : plugin.configManager().pipes()) {
+                types.add(config.key());
+            }
+            for (MachineConfig config : plugin.configManager().machines()) {
                 types.add(config.key());
             }
             plugin.configManager().messages().send(sender, "unknown-type",
@@ -190,6 +198,9 @@ public final class PumpCommand implements CommandExecutor, TabCompleter {
                 types.add(config.key());
             }
             for (PipeConfig config : plugin.configManager().pipes()) {
+                types.add(config.key());
+            }
+            for (MachineConfig config : plugin.configManager().machines()) {
                 types.add(config.key());
             }
             types.add("pump");

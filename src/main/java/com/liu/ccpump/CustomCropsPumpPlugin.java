@@ -1,15 +1,22 @@
 package com.liu.ccpump;
 
+import com.liu.ccpump.block.MachineBlock;
 import com.liu.ccpump.block.PumpPipeBlock;
 import com.liu.ccpump.command.PumpCommand;
 import com.liu.ccpump.config.ConfigManager;
+import com.liu.ccpump.config.MachineConfig;
 import com.liu.ccpump.config.PumpConfig;
 import com.liu.ccpump.data.DataStore;
 import com.liu.ccpump.gui.PumpGui;
 import com.liu.ccpump.gui.PumpGuiListener;
 import com.liu.ccpump.listener.CustomCropsReloadListener;
+import com.liu.ccpump.listener.PumpInteractListener;
 import com.liu.ccpump.listener.SprinklerConnectionListener;
+import com.liu.ccpump.gui.MachineGuiListener;
+import com.liu.ccpump.listener.MachineDropListener;
+import com.liu.ccpump.listener.MachineInteractListener;
 import com.liu.ccpump.manager.PumpManager;
+import com.liu.ccpump.machine.MachineManager;
 import com.liu.ccpump.util.PackInstaller;
 import net.momirealms.customcrops.api.BukkitCustomCropsPlugin;
 import net.momirealms.customcrops.api.core.Registries;
@@ -24,6 +31,7 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
 
     private ConfigManager configManager;
     private PumpManager pumpManager;
+    private MachineManager machineManager;
     private DataStore dataStore;
     private PumpGui gui;
     private BukkitTask tickTask;
@@ -38,13 +46,18 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
 
         this.dataStore = new DataStore(this);
         this.pumpManager = new PumpManager(this, configManager);
+        this.machineManager = new MachineManager(this, configManager);
         this.gui = new PumpGui(this);
-        this.dataStore.load(pumpManager);
+        this.dataStore.load(pumpManager, machineManager);
 
         this.registerBlockIds();
         getServer().getPluginManager().registerEvents(new CustomCropsReloadListener(this), this);
         getServer().getPluginManager().registerEvents(new PumpGuiListener(this), this);
         getServer().getPluginManager().registerEvents(new SprinklerConnectionListener(this), this);
+        getServer().getPluginManager().registerEvents(new PumpInteractListener(this), this);
+        getServer().getPluginManager().registerEvents(new MachineInteractListener(this), this);
+        getServer().getPluginManager().registerEvents(new MachineDropListener(this), this);
+        getServer().getPluginManager().registerEvents(new MachineGuiListener(this), this);
 
         PumpCommand command = new PumpCommand(this);
         PluginCommand pluginCommand = getCommand("ccpump");
@@ -56,7 +69,8 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
         PackInstaller.install(this);
         startTasks();
 
-        getLogger().info("已加载 " + pumpManager.pumpCount() + " 台水泵、" + pumpManager.pipeCount() + " 根水管。");
+        getLogger().info("已加载 " + pumpManager.pumpCount() + " 台水泵、" + pumpManager.pipeCount()
+                + " 根水管、" + machineManager.machineCount() + " 台机器。");
     }
 
     @Override
@@ -69,8 +83,9 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
             saveTask.cancel();
             saveTask = null;
         }
+        // 关服时不要主动关界面：此时玩家正在断开，closeInventory 容易炸
         if (dataStore != null && pumpManager != null) {
-            dataStore.save(pumpManager);
+            dataStore.save(pumpManager, machineManager);
         }
     }
 
@@ -89,6 +104,25 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
         for (String pipeItem : configManager.pipeItems()) {
             register(pipeItem, false);
         }
+        for (MachineConfig machineConfig : configManager.machines()) {
+            registerMachine(machineConfig);
+        }
+    }
+
+    private void registerMachine(MachineConfig machineConfig) {
+        String itemId = machineConfig.item();
+        CustomCropsBlock existing = Registries.BLOCKS.get(itemId);
+        if (existing instanceof MachineBlock machineBlock
+                && machineBlock.typeKey().equals(machineConfig.key())) {
+            return;
+        }
+        if (existing != null) {
+            getLogger().warning("物品 ID " + itemId + " 已被 CustomCrops 注册为 "
+                    + existing.type() + "，无法再注册为机器，请更换配置中的 item。");
+            return;
+        }
+        Registries.BLOCKS.register(itemId, new MachineBlock(this, itemId, machineConfig.key()));
+        debug(() -> "注册" + machineConfig.kind().displayName() + " 物品 ID: " + itemId);
     }
 
     private void register(String itemId, boolean pump) {
@@ -120,17 +154,21 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
         pumpManager.clearAppearanceCache();
         pumpManager.clampToConfig();
         pumpManager.invalidateNetworks();
+        machineManager.applyConfig();
         startTasks();
     }
 
     private void startTasks() {
         long interval = Math.max(1L, configManager.tickInterval());
-        tickTask = getServer().getScheduler().runTaskTimer(this, pumpManager::tick, interval, interval);
+        tickTask = getServer().getScheduler().runTaskTimer(this, () -> {
+            pumpManager.tick();
+            machineManager.tick();
+        }, interval, interval);
 
         long saveInterval = configManager.saveInterval();
         if (saveInterval > 0L) {
             saveTask = getServer().getScheduler().runTaskTimer(this,
-                    () -> dataStore.save(pumpManager), saveInterval, saveInterval);
+                    () -> dataStore.save(pumpManager, machineManager), saveInterval, saveInterval);
         }
     }
 
@@ -140,6 +178,10 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
 
     public PumpManager pumpManager() {
         return pumpManager;
+    }
+
+    public MachineManager machineManager() {
+        return machineManager;
     }
 
     public DataStore dataStore() {

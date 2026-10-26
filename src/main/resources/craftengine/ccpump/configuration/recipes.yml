@@ -1,0 +1,113 @@
+# ============================================================
+#  由 tools/generate_pipe_variants.py 自动生成，请勿手工编辑。
+#
+#  依次生成的配方：
+#    1. 合成水管   —— 十字形，一次出 4 根
+#    2. 合成水泵   —— 九宫格，整机不便宜
+#    3. 修复水泵   —— 破损水泵 + 8 个侦测器（比重新造一台明显便宜）
+#    4. 合成收割机 —— 九宫格，比水泵更贵
+#
+#  修复配方靠 CE 的 ingredient count 支持，一次匹配 N 个（可少于一组），
+#  玩家把 8 个侦测器叠在任意一格即可。
+# ============================================================
+recipes:
+  # ---- 水管：4 铜锭 + 1 铁锭 → 4 根 ----
+  #   十字形状和管道的 cross 模型一致
+  ccpump:water_pipe:
+    type: shaped
+    pattern:
+      - " C "
+      - "CIC"
+      - " C "
+    ingredients:
+      C: [minecraft:copper_ingot]
+      I: [minecraft:iron_ingot]
+    result:
+      id: ccpump:water_pipe
+      count: 4
+
+  # ---- 水泵：整机 ----
+  #   4 铜块(36 铜锭) + 2 铁块(18 铁锭) + 1 铁锭
+  #   + 1 侦测器 + 1 红石块(9 红石)
+  #   铜壳在外、铁块做腔体、侦测器当控制器、红石块当动力核心
+  ccpump:water_pump:
+    type: shaped
+    pattern:
+      - "CIC"
+      - "BOB"
+      - "CRC"
+    ingredients:
+      C: [minecraft:copper_block]
+      I: [minecraft:iron_ingot]
+      B: [minecraft:iron_block]
+      O: [minecraft:observer]
+      R: [minecraft:redstone_block]
+    result:
+      id: ccpump:water_pump
+      count: 1
+
+  # ---- 收割机：整机，比水泵更贵 ----
+  #   2 铁块(18 铁锭) + 2 铜块(18 铜锭) + 漏斗 + 2 铁栏杆 + 2 侦测器
+  #   铁块做机架、铜壳做外壳、漏斗当进料口、铁栏杆当分禾器、侦测器当“眼睛”
+  ccpump:harvester:
+    type: shaped
+    pattern:
+      - "IHI"
+      - "CBC"
+      - "OBO"
+    ingredients:
+      I: [minecraft:iron_block]
+      H: [minecraft:hopper]
+      C: [minecraft:copper_block]
+      B: [minecraft:iron_bars]
+      O: [minecraft:observer]
+    result:
+      id: ccpump:harvester
+      count: 1
+
+  # ---- 洒水机：水箱 + 喷头 ----
+  #   4 铁锭 + 2 铜块 + 水桶(当水箱) + 侦测器
+  ccpump:sprinkler_machine:
+    type: shaped
+    pattern:
+      - "ICI"
+      - "CWC"
+      - "IOI"
+    ingredients:
+      I: [minecraft:iron_ingot]
+      C: [minecraft:copper_block]
+      W: [minecraft:water_bucket]
+      O: [minecraft:observer]
+    result:
+      id: ccpump:sprinkler_machine
+      count: 1
+
+  # ---- 施肥机：料斗 + 骨粉 ----
+  #   4 铁锭 + 2 铜块 + 骨粉 + 漏斗 + 侦测器
+  ccpump:fertilizer_machine:
+    type: shaped
+    pattern:
+      - "IBI"
+      - "CHC"
+      - "IOI"
+    ingredients:
+      I: [minecraft:iron_ingot]
+      B: [minecraft:bone_meal]
+      C: [minecraft:copper_block]
+      H: [minecraft:hopper]
+      O: [minecraft:observer]
+    result:
+      id: ccpump:fertilizer_machine
+      count: 1
+
+  # ---- 修复：破损水泵 + 8 个侦测器 → 新的水泵 ----
+  #   刻意比重新造一台便宜，玩家才有理由去修而不是扔掉重做
+  ccpump:repair_water_pump:
+    type: shapeless
+    ingredients:
+      - items: [ccpump:broken_pump]
+      - items: [minecraft:observer]
+        count: 8
+    result:
+      id: ccpump:water_pump
+      count: 1

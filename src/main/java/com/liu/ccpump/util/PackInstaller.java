@@ -40,7 +40,13 @@ public final class PackInstaller {
         }
 
         File root = new File(craftEngine.getDataFolder(), "resources/ccpump");
-        boolean overwrite = plugin.configManager().packOverwrite();
+        // 插件自带的资源包升级时（pack.yml 的 version 变了）强制同步一次：
+        // 否则老服务器会留着旧模型/旧方块定义，新加的机器放下去是空的。
+        boolean outdated = isOutdated(plugin, root);
+        boolean overwrite = plugin.configManager().packOverwrite() || outdated;
+        if (outdated) {
+            plugin.getLogger().info("检测到资源包版本变化，正在覆盖更新 " + root + "。");
+        }
 
         List<String> resources = listResources(plugin);
         if (resources.isEmpty()) {
@@ -85,6 +91,49 @@ public final class PackInstaller {
     }
 
     /**
+     * 服务器上已安装的资源包版本是否与 jar 内的不一致。
+     *
+     * <p>只比对 {@code pack.yml} 里的 {@code version:}，不比对文件内容：
+     * 玩家改过的模型在日常重启时不会被覆盖，插件带新资源时才会同步一次。
+     */
+    private static boolean isOutdated(CustomCropsPumpPlugin plugin, File root) {
+        String bundled = readVersion(plugin.getResource(SOURCE_ROOT + "pack.yml"));
+        if (bundled == null) {
+            return false;
+        }
+        File installed = new File(root, "pack.yml");
+        if (!installed.isFile()) {
+            return false;
+        }
+        try (InputStream in = Files.newInputStream(installed.toPath())) {
+            String current = readVersion(in);
+            return current != null && !bundled.equals(current);
+        } catch (IOException error) {
+            return false;
+        }
+    }
+
+    private static String readVersion(InputStream in) {
+        if (in == null) {
+            return null;
+        }
+        try (InputStream stream = in;
+             java.io.BufferedReader reader = new java.io.BufferedReader(
+                     new java.io.InputStreamReader(stream, java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("version:")) {
+                    return trimmed.substring("version:".length()).replace("\"", "").replace("'", "").trim();
+                }
+            }
+        } catch (IOException ignored) {
+            return null;
+        }
+        return null;
+    }
+
+    /**
      * 枚举 jar 内的资源包文件；开发环境（classes 目录）下退化为固定清单。
      */
     private static List<String> listResources(CustomCropsPumpPlugin plugin) {
@@ -113,8 +162,13 @@ public final class PackInstaller {
                     "pack.yml",
                     "configuration/items.yml",
                     "configuration/categories.yml",
+                    "configuration/recipes.yml",
                     "resourcepack/assets/ccpump/models/block/water_pump.json",
                     "resourcepack/assets/ccpump/models/block/water_pipe.json",
+                    "resourcepack/assets/ccpump/models/block/broken_pump.json",
+                    "resourcepack/assets/ccpump/models/block/harvester.json",
+                    "resourcepack/assets/ccpump/models/block/sprinkler_machine.json",
+                    "resourcepack/assets/ccpump/models/block/fertilizer_machine.json",
                     "resourcepack/assets/ccpump/models/block/pipe/water_pipe_straight_ew.json",
                     "resourcepack/assets/ccpump/models/block/pipe/water_pipe_straight_ns.json",
                     "resourcepack/assets/ccpump/models/block/pipe/water_pipe_vertical.json",

@@ -8,6 +8,7 @@ import com.liu.ccpump.data.BlockKey;
 import com.liu.ccpump.data.Network;
 import com.liu.ccpump.data.PipeInstance;
 import com.liu.ccpump.data.PumpInstance;
+import com.liu.ccpump.util.WaterSources;
 import net.momirealms.customcrops.api.core.ExistenceForm;
 import net.momirealms.customcrops.api.core.block.SprinklerBlock;
 import net.momirealms.customcrops.api.core.mechanic.sprinkler.SprinklerConfig;
@@ -21,7 +22,6 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
-import org.bukkit.block.data.Waterlogged;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -58,6 +58,9 @@ public final class PumpManager {
     private static final int[] MASK_BITS = {1, 2, 4, 8, 16, 32};
 
     private final CustomCropsPumpPlugin plugin;
+    /** 耐久耗尽后掉落的物品 ID（纯物品，不是方块）。 */
+    public static final String BROKEN_PUMP_ITEM = "ccpump:broken_pump";
+
     private final ConfigManager config;
 
     private final Map<BlockKey, PumpInstance> pumps = new LinkedHashMap<>();
@@ -150,11 +153,30 @@ public final class PumpManager {
     // 交互
     // ------------------------------------------------------------------
 
+    /**
+     * 该位置是不是本插件的水泵方块。
+     *
+     * <p>只认 CustomCrops 报上来的方块 ID，不依赖内存里的 {@code pumps} 表，
+     * 这样即使数据库丢了记录（区块刚加载、手工编辑过库），右键也能自愈。
+     */
+    public boolean isPumpBlock(Location location) {
+        World world = location.getWorld();
+        if (world == null) {
+            return false;
+        }
+        BlockKey key = BlockKey.of(location);
+        if (!isChunkLoaded(world, key)) {
+            return false;
+        }
+        String id = blockId(key, world);
+        return id != null && config.isPumpItem(id);
+    }
+
     public void interactPump(Player player, Location location, EquipmentSlot hand, ItemStack itemInHand) {
         BlockKey key = BlockKey.of(location);
         PumpInstance pump = pumps.get(key);
         if (pump == null) {
-            // 数据库丢记录或区块刚加载时，用世界上真实的家具 ID 自愈
+            // 数据库丢记录或区块刚加载时，用世界上真实的方块 ID 自愈
             pump = registerExistingPump(key);
         }
         if (pump == null) {
@@ -169,21 +191,10 @@ public final class PumpManager {
             return;
         }
 
-        if (itemInHand != null) {
-            Material type = itemInHand.getType();
-            if (type == Material.WATER_BUCKET) {
-                fillFromBucket(player, pump, pumpConfig, hand);
-                return;
-            }
-            Integer fuel = config.fuelValue(type);
-            if (fuel != null) {
-                chargePump(player, pump, pumpConfig, hand, itemInHand, fuel);
-                return;
-            }
-            if (config.isBlockedFuel(type)) {
-                config.messages().send(player, "pump-fuel-blocked", "item", itemName(type));
-                return;
-            }
+        // 水桶是对着水泵直接倒水，与“开界面”不冲突，保留这个快捷动作。
+        if (itemInHand != null && itemInHand.getType() == Material.WATER_BUCKET) {
+            fillFromBucket(player, pump, pumpConfig, hand);
+            return;
         }
 
         if (player.isSneaking() && pumpConfig.allowToggle()) {
@@ -191,7 +202,12 @@ public final class PumpManager {
             return;
         }
 
-        // 界面里会显示动力，这里不再额外发聊天提示，避免"右键只弹出消息"的错觉
+        // 右键一律打开界面。
+        //
+        // 水泵改成方块以后，手持红石这类“可以放置的方块物品”右键时，
+        // 原版会优先尝试把它摆到相邻位置，充电那条分支根本轮不到，
+        // 表现就是“手持红石右键无法充能”。所以充能改到界面里投放，
+        // 右键只负责开界面。
         plugin.getServer().getScheduler().runTask(plugin, () -> plugin.gui().open(player, key));
     }
 
@@ -239,44 +255,46 @@ public final class PumpManager {
         };
     }
 
-    private void chargePump(Player player, PumpInstance pump, PumpConfig pumpConfig,
-                            EquipmentSlot hand, ItemStack itemInHand, int fuel) {
+    /**
+     * 用某种燃料给水泵充能。
+     *
+     * <p>只消耗真正用得上的数量：动力还差 30 点、红石每块 5 点时只吃 6 块，
+     * 不会把玩家那一整组燃料一口气吞掉再丢掉溢出的部分。
+     *
+     * @param available 手头可用的燃料数量
+     * @return 实际消耗的物品数（0 表示没充上，调用方不必扣物品）
+     */
+    public int chargeWithFuel(Player player, PumpInstance pump, PumpConfig pumpConfig,
+                              Material material, int available) {
         if (pumpConfig.chargeCapacity() <= 0) {
             config.messages().send(player, "pump-charge-disabled");
-            return;
+            return 0;
         }
         int space = pumpConfig.chargeCapacity() - pump.charge();
         if (space <= 0) {
             config.messages().send(player, "pump-charge-full",
                     "charge", String.valueOf(pump.charge()),
                     "capacity", String.valueOf(pumpConfig.chargeCapacity()));
-            return;
+            return 0;
         }
-        int amount = Math.min(space, fuel);
-        pump.charge(pump.charge() + amount);
+        Integer fuel = config.fuelValue(material);
+        if (fuel == null || fuel <= 0) {
+            config.messages().send(player, "pump-fuel-invalid", "item", itemName(material));
+            return 0;
+        }
+        if (available <= 0) {
+            return 0;
+        }
 
-        if (player.getGameMode() != GameMode.CREATIVE) {
-            consumeOne(player, hand, itemInHand.getType());
-        }
+        int consume = Math.min(available, (space + fuel - 1) / fuel);
+        int amount = Math.min(space, consume * fuel);
+        pump.charge(pump.charge() + amount);
 
         config.messages().send(player, "pump-charged",
                 "amount", String.valueOf(amount),
                 "charge", String.valueOf(pump.charge()),
                 "capacity", String.valueOf(pumpConfig.chargeCapacity()));
-    }
-
-    private void consumeOne(Player player, EquipmentSlot hand, Material material) {
-        EquipmentSlot usedHand = hand == EquipmentSlot.OFF_HAND ? EquipmentSlot.OFF_HAND : EquipmentSlot.HAND;
-        ItemStack current = player.getInventory().getItem(usedHand);
-        if (current == null || current.getType() != material) {
-            return;
-        }
-        if (current.getAmount() <= 1) {
-            player.getInventory().setItem(usedHand, null);
-        } else {
-            current.setAmount(current.getAmount() - 1);
-            player.getInventory().setItem(usedHand, current);
-        }
+        return consume;
     }
 
     private void fillFromBucket(Player player, PumpInstance pump, PumpConfig pumpConfig, EquipmentSlot hand) {
@@ -415,8 +433,8 @@ public final class PumpManager {
      *
      * <p>水平与垂直是两套互不相通的管网，连通规则：
      * <ul>
-     *   <li>水平方向（东西南北）：相邻的水泵 / 水管 / 洒水器都算连接；</li>
-     *   <li>垂直方向（上下）：只有相邻的水管算连接，水泵和洒水器都不接，
+     *   <li>水平方向（东西南北）：相邻的水泵 / 水管 / 洒水器 / 洒水机都算连接；</li>
+     *   <li>垂直方向（上下）：只有相邻的水管算连接，水泵和取水设备都不接，
      *       因此竖管自成一路，不会和平面管网串起来。</li>
      * </ul>
      *
@@ -434,11 +452,16 @@ public final class PumpManager {
                     mask |= MASK_BITS[i];
                 }
             } else if (pipes.containsKey(neighbor) || pumps.containsKey(neighbor)
-                    || isSprinklerKey(neighbor)) {
+                    || isSprinklerKey(neighbor) || isMachineEndpoint(neighbor)) {
                 mask |= MASK_BITS[i];
             }
         }
         return mask;
+    }
+
+    /** 洒水机也算一个取水点：水管可以直接接到它上面供水。 */
+    private boolean isMachineEndpoint(BlockKey key) {
+        return plugin.machineManager().isWaterMachine(key);
     }
 
     private boolean isSprinklerKey(BlockKey key) {
@@ -578,7 +601,7 @@ public final class PumpManager {
         if (!pumpConfig.source().required()) {
             pump.sourceAvailable(true);
         } else if (pump.lastSourceCheck() < 0 || tick - pump.lastSourceCheck() >= cycles(config.sourceCheckInterval())) {
-            pump.sourceAvailable(hasWaterSource(world, pump.key(), pumpConfig.source().radius()));
+            pump.sourceAvailable(WaterSources.any(world, pump.key(), pumpConfig.source().radius()));
             pump.lastSourceCheck(tick);
         }
 
@@ -596,7 +619,7 @@ public final class PumpManager {
             if (draw > 0) {
                 pump.water(pump.water() + draw);
                 if (pumpConfig.source().consume()) {
-                    consumeWaterSource(world, pump.key(), pumpConfig.source().radius());
+                    WaterSources.consume(world, pump.key(), pumpConfig.source().radius());
                 }
                 worked = true;
             }
@@ -619,22 +642,85 @@ public final class PumpManager {
         if (worked && pumpConfig.chargeCapacity() > 0) {
             pump.charge(Math.max(0, pump.charge() - pumpConfig.chargePerCycle()));
         }
+
+        // 耐久只在“真的干活”时扣：空转、停机、没有水源都不磨损。
+        if (worked && pumpConfig.durability() > 0) {
+            pump.wear(pump.wear() + 1);
+            if (pump.wear() >= pumpConfig.durability()) {
+                wearOut(world, pump, pumpConfig);
+            }
+        }
     }
 
-    private int deliver(World world, PumpInstance pump, PumpConfig pumpConfig, List<Pos3> sprinklerPositions) {
+    /**
+     * 耐久耗尽：水泵消失，原地掉落一个破损水泵。
+     *
+     * <p>刻意不走 CE 的破坏流程：那条路会按战利品表掉出**完好的**水泵，
+     * 玩家等于零成本换新。这里直接把方块设成空气（不产生掉落），
+     * 再手动丢一个破损件。
+     */
+    private void wearOut(World world, PumpInstance pump, PumpConfig pumpConfig) {
+        BlockKey key = pump.key();
+        Location location = key.toLocation(world);
+        try {
+            location.getBlock().setType(Material.AIR, false);
+        } catch (Throwable throwable) {
+            plugin.getLogger().warning("移除耐久耗尽的水泵失败（" + key + "）: " + throwable.getMessage());
+        }
+        dropBrokenPump(world, location);
+        // breakAt 负责清记录、关界面、刷新相邻水管外观
+        breakAt(location);
+
+        String name = pumpConfig.key();
+        plugin.getLogger().info("水泵 " + key + "（" + name + "）耐久耗尽，已掉落破损水泵。");
+        for (Player nearby : world.getPlayers()) {
+            if (nearby.getLocation().distanceSquared(location) <= 16 * 16) {
+                config.messages().send(nearby, "pump-worn-out");
+            }
+        }
+    }
+
+    /**
+     * 掉落一个破损水泵。物品缺失（资源包没装好）时只告警，不影响主循环。
+     */
+    private void dropBrokenPump(World world, Location location) {
+        ItemStack broken = null;
+        try {
+            broken = plugin.customCrops().getItemManager().build(null, BROKEN_PUMP_ITEM);
+        } catch (Throwable throwable) {
+            plugin.getLogger().warning("生成破损水泵物品失败: " + throwable.getMessage());
+        }
+        if (broken == null) {
+            plugin.getLogger().warning("找不到物品 " + BROKEN_PUMP_ITEM
+                    + "，耐久耗尽的水泵将不会掉落任何东西。请确认 CraftEngine 资源包已加载。");
+            return;
+        }
+        world.dropItemNaturally(location.clone().add(0.5D, 0.5D, 0.5D), broken);
+    }
+
+    private int deliver(World world, PumpInstance pump, PumpConfig pumpConfig, List<Pos3> endpoints) {
         CustomCropsWorld<?> customCropsWorld = plugin.customCrops().getWorldManager()
                 .getWorld(world).orElse(null);
-        if (customCropsWorld == null) {
-            return 0;
-        }
 
         int remaining = pump.water();
         int delivered = 0;
-        for (Pos3 pos : sprinklerPositions) {
+        for (Pos3 pos : endpoints) {
             if (remaining <= 0) {
                 break;
             }
             try {
+                // 洒水机：和 CustomCrops 洒水器一样是取水点，水管直接把它的水箱灌满
+                int push = Math.min(remaining, pumpConfig.pushRate());
+                int filled = plugin.machineManager().fillFromNetwork(
+                        new BlockKey(world.getName(), pos.x(), pos.y(), pos.z()), push);
+                if (filled > 0) {
+                    remaining -= filled;
+                    delivered += filled;
+                    continue;
+                }
+                if (customCropsWorld == null) {
+                    continue;
+                }
                 Optional<CustomCropsBlockState> optional = customCropsWorld.getLoadedBlockState(pos);
                 if (optional.isEmpty()) {
                     continue;
@@ -687,68 +773,6 @@ public final class PumpManager {
         if (sound != null && !sound.isBlank()) {
             world.playSound(center, sound, pumpConfig.effects().volume(), pumpConfig.effects().pitch());
         }
-    }
-
-    // ------------------------------------------------------------------
-    // 水源
-    // ------------------------------------------------------------------
-
-    private boolean hasWaterSource(World world, BlockKey key, int radius) {
-        int effectiveRadius = Math.max(1, radius);
-        for (int dx = -effectiveRadius; dx <= effectiveRadius; dx++) {
-            for (int dy = -effectiveRadius; dy <= effectiveRadius; dy++) {
-                for (int dz = -effectiveRadius; dz <= effectiveRadius; dz++) {
-                    if (dx == 0 && dy == 0 && dz == 0) {
-                        continue;
-                    }
-                    if (!isChunkLoaded(world, key.offset(dx, dy, dz))) {
-                        continue;
-                    }
-                    int y = key.y() + dy;
-                    if (y < world.getMinHeight() || y >= world.getMaxHeight()) {
-                        continue;
-                    }
-                    Block block = world.getBlockAt(key.x() + dx, y, key.z() + dz);
-                    if (isWater(block)) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    private void consumeWaterSource(World world, BlockKey key, int radius) {
-        int effectiveRadius = Math.max(1, radius);
-        for (int dx = -effectiveRadius; dx <= effectiveRadius; dx++) {
-            for (int dy = -effectiveRadius; dy <= effectiveRadius; dy++) {
-                for (int dz = -effectiveRadius; dz <= effectiveRadius; dz++) {
-                    if (dx == 0 && dy == 0 && dz == 0) {
-                        continue;
-                    }
-                    if (!isChunkLoaded(world, key.offset(dx, dy, dz))) {
-                        continue;
-                    }
-                    int y = key.y() + dy;
-                    if (y < world.getMinHeight() || y >= world.getMaxHeight()) {
-                        continue;
-                    }
-                    Block block = world.getBlockAt(key.x() + dx, y, key.z() + dz);
-                    if (block.getType() == Material.WATER) {
-                        block.setType(Material.AIR, false);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    private boolean isWater(Block block) {
-        Material type = block.getType();
-        if (type == Material.WATER || type == Material.BUBBLE_COLUMN) {
-            return true;
-        }
-        return block.getBlockData() instanceof Waterlogged waterlogged && waterlogged.isWaterlogged();
     }
 
     // ------------------------------------------------------------------
@@ -812,9 +836,10 @@ public final class PumpManager {
                     foundPipes.add(next);
                     nodes.add(next);
                     queue.add(next);
-                } else if (customCropsWorld != null
-                        && foundSprinklers.size() < maxSprinklers
-                        && isSprinkler(customCropsWorld, next)) {
+                } else if (foundSprinklers.size() < maxSprinklers
+                        && (isMachineEndpoint(new BlockKey(start.world(), next.x(), next.y(), next.z()))
+                        || (customCropsWorld != null && isSprinkler(customCropsWorld, next)))) {
+                    // 洒水器与洒水机同样是管网终点，一起按距离/顺序补水
                     foundSprinklers.add(next);
                 }
             }
@@ -930,7 +955,7 @@ public final class PumpManager {
     }
 
     /**
-     * 判断水泵是否还在：只认家具 ID。
+     * 判断水泵是否还在：只认方块 ID。
      * <p>
      * 注意：不能用 {@code ExistenceForm.ANY}。水泵脚下通常是草方块/水，
      * ANY 会优先返回脚下方块 ID，把水泵误判成“已消失”并在
@@ -973,6 +998,7 @@ public final class PumpManager {
         addPipeIndex(pipe.key());
     }
 
+    /** 管网拓扑变了（多/少了一个取水点），让所有水泵下一轮重建网络。 */
     public void invalidateNetworks() {
         pipeVersion++;
     }

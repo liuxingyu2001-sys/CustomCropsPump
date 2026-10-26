@@ -12,3 +12,7 @@ categories:
       - ccpump:water_pipe_straight_ns
       - ccpump:water_pipe_vertical
       - ccpump:water_pipe_cross
+      - ccpump:broken_pump
+      - ccpump:harvester
+      - ccpump:sprinkler_machine
+      - ccpump:fertilizer_machine

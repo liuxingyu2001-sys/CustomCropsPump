@@ -14,6 +14,7 @@ public record PumpConfig(
         int bucketAmount,
         int chargeCapacity,
         int chargePerCycle,
+        int durability,
         boolean allowToggle,
         Source source,
         Network network,
