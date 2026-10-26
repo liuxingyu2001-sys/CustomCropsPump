@@ -40,12 +40,12 @@ public final class PackInstaller {
         }
 
         File root = new File(craftEngine.getDataFolder(), "resources/ccpump");
-        // 插件自带的资源包升级时（pack.yml 的 version 变了）强制同步一次：
+        // 插件自带的资源包升级时强制同步一次：
         // 否则老服务器会留着旧模型/旧方块定义，新加的机器放下去是空的。
         boolean outdated = isOutdated(plugin, root);
         boolean overwrite = plugin.configManager().packOverwrite() || outdated;
         if (outdated) {
-            plugin.getLogger().info("检测到资源包版本变化，正在覆盖更新 " + root + "。");
+            plugin.getLogger().info("检测到插件版本变化，正在覆盖更新资源包 " + root + "。");
         }
 
         List<String> resources = listResources(plugin);
@@ -79,9 +79,14 @@ public final class PackInstaller {
             }
         }
 
-        if (copied > 0) {
-            plugin.getLogger().info("已安装 CraftEngine 资源包到 " + root
-                    + "（" + copied + " 个文件），请执行 /ce reload all 或重启服务器使其生效。");
+        if (copied > 0 || overwrite) {
+            int removed = pruneStale(root, resources);
+            writeStamp(plugin, root);
+            writeManifest(root, resources);
+            plugin.getLogger().info("已释放 CraftEngine 资源包到 " + root
+                    + "（写入 " + copied + " 个文件"
+                    + (removed > 0 ? "，清理 " + removed + " 个旧文件" : "") + "）"
+                    + "，请执行 /ce reload all 或重启服务器使其生效。");
         }
         if (skipped > 0 && !overwrite) {
             plugin.getLogger().info("检测到已有 ccpump 资源包，已保留现有 " + skipped + " 个文件（未覆盖）。"
@@ -90,26 +95,128 @@ public final class PackInstaller {
         }
     }
 
+    /** 记录“上一次是从哪个插件版本释放出来的”的标记文件。 */
+    private static final String STAMP_FILE = ".ccpump-pack-version";
+    /** 记录“上次释放了哪些文件”，用来清理插件自己写过、但新版本已不再提供的文件。 */
+    private static final String MANIFEST_FILE = ".ccpump-pack-files";
+
     /**
-     * 服务器上已安装的资源包版本是否与 jar 内的不一致。
+     * 服务器上已安装的资源包是不是旧的。
      *
-     * <p>只比对 {@code pack.yml} 里的 {@code version:}，不比对文件内容：
-     * 玩家改过的模型在日常重启时不会被覆盖，插件带新资源时才会同步一次。
+     * <p>判定依据是**插件版本**，不是 {@code pack.yml} 里的 {@code version:}：
+     * 后者要人工维护，漏改一次（改模型却忘升版本号）就会让老服务器一直留着旧资源，
+     * 而插件版本每次发版必然变化，跟它走就不会漏。
+     *
+     * <p>仍然保留 pack.yml 的比对作为兜底：手工改了包里的 version 也能触发一次同步。
+     * 都不比对文件内容，因此玩家改过的模型在日常重启时不会被覆盖。
      */
     private static boolean isOutdated(CustomCropsPumpPlugin plugin, File root) {
+        String pluginVersion = plugin.getPluginMeta().getVersion();
+        if (!root.isDirectory()) {
+            // 没装过：交给下面的复制流程处理，不算“版本变化”
+            return false;
+        }
+        String stamped = readStamp(root);
+        if (!pluginVersion.equals(stamped)) {
+            return true;
+        }
         String bundled = readVersion(plugin.getResource(SOURCE_ROOT + "pack.yml"));
         if (bundled == null) {
             return false;
         }
         File installed = new File(root, "pack.yml");
         if (!installed.isFile()) {
-            return false;
+            return true;
         }
         try (InputStream in = Files.newInputStream(installed.toPath())) {
             String current = readVersion(in);
             return current != null && !bundled.equals(current);
         } catch (IOException error) {
-            return false;
+            return true;
+        }
+    }
+
+    /**
+     * 删掉“上次我们写过、这次包里已经没有”的文件。
+     *
+     * <p>只按清单删：玩家自己往包里加的文件不在清单里，绝不会被碰。
+     * 这样改名/删除模型时不会留下孤儿文件——CE 会继续加载它们，
+     * 表现为“明明删了物品，服务器里还能刷出来”。
+     */
+    private static int pruneStale(File root, List<String> current) {
+        File manifest = new File(root, MANIFEST_FILE);
+        if (!manifest.isFile()) {
+            return 0;
+        }
+        List<String> previous;
+        try {
+            previous = Files.readAllLines(manifest.toPath(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            return 0;
+        }
+        int removed = 0;
+        for (String line : previous) {
+            String path = line.trim();
+            if (path.isEmpty() || current.contains(path)) {
+                continue;
+            }
+            try {
+                java.nio.file.Path target = new File(root, path).toPath().normalize();
+                if (!target.startsWith(root.toPath().normalize()) || !Files.isRegularFile(target)) {
+                    continue;
+                }
+                Files.delete(target);
+                removed++;
+                // 顺手删掉空目录，避免留下 configuration/ 这类空壳
+                java.nio.file.Path parent = target.getParent();
+                while (parent != null && !parent.equals(root.toPath().normalize())) {
+                    try (java.util.stream.Stream<java.nio.file.Path> entries = Files.list(parent)) {
+                        if (entries.findAny().isEmpty()) {
+                            Files.delete(parent);
+                            parent = parent.getParent();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            } catch (IOException ignored) {
+                // 删不掉就算了，下次启动再试
+            }
+        }
+        return removed;
+    }
+
+    private static void writeManifest(File root, List<String> resources) {
+        try {
+            Files.write(new File(root, MANIFEST_FILE).toPath(), resources,
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            // 清单写失败只影响下次的陈旧文件清理，不影响本次释放
+        }
+    }
+
+    private static String readStamp(File root) {
+        File stamp = new File(root, STAMP_FILE);
+        if (!stamp.isFile()) {
+            return "";
+        }
+        try {
+            return Files.readString(stamp.toPath(), java.nio.charset.StandardCharsets.UTF_8).trim();
+        } catch (IOException error) {
+            return "";
+        }
+    }
+
+    private static void writeStamp(CustomCropsPumpPlugin plugin, File root) {
+        File stamp = new File(root, STAMP_FILE);
+        try {
+            if (!root.isDirectory() && !root.mkdirs()) {
+                return;
+            }
+            Files.writeString(stamp.toPath(), plugin.getPluginMeta().getVersion(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            plugin.getLogger().warning("写入资源包版本标记失败: " + error.getMessage());
         }
     }
 

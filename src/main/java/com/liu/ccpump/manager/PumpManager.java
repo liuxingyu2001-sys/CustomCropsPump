@@ -74,6 +74,17 @@ public final class PumpManager {
     /** 已提示过“缺少形态”的水管配置，避免重复告警。 */
     private final Set<String> warnedPipeVariants = new HashSet<>();
 
+    /**
+     * 世界连连续几次校验都取不到，就认为它已经被删了，清掉这个世界的水泵/水管记录。
+     *
+     * <p>只是“暂未加载”的世界下次加载就会命中，计数清零，所以给 5 次宽限
+     * （默认 {@code validate-interval: 1200} tick，即 5 分钟）。
+     */
+    private static final int MISSING_WORLD_PASSES = 5;
+
+    /** 世界名 → 连续取不到该世界的次数。 */
+    private final Map<String, Integer> missingWorlds = new HashMap<>();
+
     private long pipeVersion;
     private long tick;
 
@@ -591,6 +602,9 @@ public final class PumpManager {
             }
             World world = Bukkit.getWorld(pump.key().world());
             if (world == null || !isChunkLoaded(world, pump.key())) {
+                // 机器不在加载范围内：连同管网/水源缓存一起放掉，
+                // 否则这份 BFS 结果会一直挂在内存里（区块回来时再重建，行为不变）。
+                pump.releaseCache();
                 continue;
             }
             tickPump(world, pump, pumpConfig);
@@ -886,6 +900,27 @@ public final class PumpManager {
         return Math.max(1L, (ticks + interval - 1L) / interval);
     }
 
+    /**
+     * 记录一次“取不到这个世界的方块”。
+     *
+     * @return true 表示连续失败次数已达上限，调用方应该清掉这条记录
+     */
+    private boolean missingWorld(String worldName) {
+        int passes = missingWorlds.merge(worldName, 1, Integer::sum);
+        if (passes < MISSING_WORLD_PASSES) {
+            return false;
+        }
+        missingWorlds.remove(worldName);
+        return true;
+    }
+
+    /** 世界取到了：把失败计数清掉。 */
+    private void seenWorld(String worldName) {
+        if (!missingWorlds.isEmpty()) {
+            missingWorlds.remove(worldName);
+        }
+    }
+
     private static boolean isChunkLoaded(World world, BlockKey key) {
         return world.isChunkLoaded(key.x() >> 4, key.z() >> 4);
     }
@@ -917,7 +952,18 @@ public final class PumpManager {
                 continue;
             }
             World world = Bukkit.getWorld(pump.key().world());
-            if (world == null || !isChunkLoaded(world, pump.key())) {
+            if (world == null) {
+                // 世界还在加载就先留着；连续多次取不到说明世界没了，释放这条记录
+                if (missingWorld(pump.key().world())) {
+                    iterator.remove();
+                    pipeVersion++;
+                    debug(() -> "世界已不存在，清理水泵记录 @ " + pump.key());
+                }
+                continue;
+            }
+            seenWorld(pump.key().world());
+            if (!isChunkLoaded(world, pump.key())) {
+                pump.releaseCache();
                 continue;
             }
             if (!isStillThere(pump.key(), world, pumpConfig)) {
@@ -937,7 +983,17 @@ public final class PumpManager {
                 continue;
             }
             World world = Bukkit.getWorld(pipe.key().world());
-            if (world == null || !isChunkLoaded(world, pipe.key())) {
+            if (world == null) {
+                if (missingWorld(pipe.key().world())) {
+                    iterator.remove();
+                    removePipeIndex(pipe.key());
+                    pipeVersion++;
+                    debug(() -> "世界已不存在，清理水管记录 @ " + pipe.key());
+                }
+                continue;
+            }
+            seenWorld(pipe.key().world());
+            if (!isChunkLoaded(world, pipe.key())) {
                 continue;
             }
             String itemId = blockId(pipe.key(), world);

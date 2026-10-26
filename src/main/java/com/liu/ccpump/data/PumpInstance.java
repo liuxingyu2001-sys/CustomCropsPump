@@ -92,6 +92,22 @@ public final class PumpInstance {
         this.lastSourceCheck = lastSourceCheck;
     }
 
+    /**
+     * 丢掉管网缓存与水源缓存。
+     *
+     * <p>区块卸载 / 世界没了以后 {@code tickPump} 整段被跳过，缓存再也刷不到，
+     * 就会一直挂在内存里（一台水泵最多几十个坐标）。这里主动释放，
+     * 区块下次加载时按需重建，行为不变。
+     */
+    public void releaseCache() {
+        // 置 null 而不是 EMPTY：network() 靠 null 判断“没缓存”，
+        // 留一个空对象会让新加载的区块误以为管网是空的。
+        this.network = null;
+        this.networkBuiltTick = -1L;
+        this.networkVersion = -1L;
+        this.lastSourceCheck = -1L;
+    }
+
     public Network network() {
         return network;
     }
