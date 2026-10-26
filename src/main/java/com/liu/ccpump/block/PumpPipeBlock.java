@@ -22,8 +22,20 @@ public final class PumpPipeBlock extends AbstractCustomCropsBlock {
     private final String itemId;
     private final boolean pump;
 
+    /**
+     * 机制名（{@code type()}）不要跟方块 ID 同名。
+     *
+     * <p>方块 ID 是 {@code ccpump:water_pump} 这类“放下去是什么”，
+     * 机制名是“这台方块按什么逻辑处理事件”。两者混用会让
+     * {@code BLOCKS} 里的键和值的 type 长得一样，重载后自检无法区分
+     * “我们自己注册的”和“别的插件占了这个 ID”。
+     */
+    public static Key mechanicKey(boolean pump) {
+        return Key.key("ccpump", pump ? "pump" : "pipe");
+    }
+
     public PumpPipeBlock(CustomCropsPumpPlugin plugin, String itemId, boolean pump) {
-        super(Key.key("ccpump", pump ? "water_pump" : "water_pipe"));
+        super(mechanicKey(pump));
         this.plugin = plugin;
         this.itemId = itemId;
         this.pump = pump;

@@ -21,6 +21,7 @@ import com.liu.ccpump.util.PackInstaller;
 import net.momirealms.customcrops.api.BukkitCustomCropsPlugin;
 import net.momirealms.customcrops.api.core.Registries;
 import net.momirealms.customcrops.api.core.block.CustomCropsBlock;
+import net.momirealms.customcrops.common.util.Key;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -117,8 +118,7 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
             return;
         }
         if (existing != null) {
-            getLogger().warning("物品 ID " + itemId + " 已被 CustomCrops 注册为 "
-                    + existing.type() + "，无法再注册为机器，请更换配置中的 item。");
+            warnOccupied(itemId, existing, "机器");
             return;
         }
         Registries.BLOCKS.register(itemId, new MachineBlock(this, itemId, machineConfig.key()));
@@ -131,12 +131,30 @@ public final class CustomCropsPumpPlugin extends JavaPlugin {
             return;
         }
         if (existing != null) {
-            getLogger().warning("物品 ID " + itemId + " 已被 CustomCrops 注册为 "
-                    + existing.type() + "，无法再注册为水泵/水管，请更换配置中的 item。");
+            warnOccupied(itemId, existing, pump ? "水泵" : "水管");
             return;
         }
         Registries.BLOCKS.register(itemId, new PumpPipeBlock(this, itemId, pump));
         debug(() -> "注册 " + (pump ? "水泵" : "水管") + " 物品 ID: " + itemId);
+    }
+
+    /**
+     * 报“这个物品 ID 被占了”。
+     *
+     * <p>先看机制名：机制名是本插件自己的（{@code ccpump:pump}/{@code ccpump:pipe}/
+     * {@code ccpump:machine_*}），说明条目是本插件以前注册的、只是实例对不上，
+     * 这种情况属于**本插件自己的重载时序**，不是玩家配错了，不能叫人去换 item。
+     */
+    private void warnOccupied(String itemId, CustomCropsBlock existing, String what) {
+        Key type = existing.type();
+        boolean ours = type != null && "ccpump".equals(type.namespace());
+        if (ours) {
+            getLogger().warning("物品 ID " + itemId + " 上的" + what + "注册条目已存在（机制 "
+                    + type + "），本次跳过重复注册；若刚改过配置，重启服务器后生效。");
+            return;
+        }
+        getLogger().warning("物品 ID " + itemId + " 已被 CustomCrops 注册为 "
+                + type + "，无法再注册为" + what + "，请更换配置中的 item。");
     }
 
     public void reloadPlugin() {

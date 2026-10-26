@@ -25,8 +25,13 @@ public final class MachineBlock extends AbstractCustomCropsBlock {
     private final String itemId;
     private final String typeKey;
 
+    /** 机制名统一加前缀，避免和方块 ID（{@code ccpump:harvester} 之类）撞在一起。 */
+    public static Key mechanicKey(String typeKey) {
+        return Key.key("ccpump", "machine_" + typeKey);
+    }
+
     public MachineBlock(CustomCropsPumpPlugin plugin, String itemId, String typeKey) {
-        super(Key.key("ccpump", typeKey));
+        super(mechanicKey(typeKey));
         this.plugin = plugin;
         this.itemId = itemId;
         this.typeKey = typeKey;
